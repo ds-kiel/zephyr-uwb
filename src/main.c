@@ -1,9 +1,10 @@
-#include <logging/log.h>
-#include <zephyr.h>
+#include <zephyr/logging/log.h>
+#include <zephyr/zephyr.h>
 
-#include <net/net_core.h>
-#include <net/ieee802154_radio.h>
-#include <drivers/ieee802154/dw1000.h>
+#include <zephyr/devicetree.h>
+#include <zephyr/net/ieee802154_radio.h>
+#include <zephyr/net/ieee802154_radio.h>
+#include <zephyr/drivers/ieee802154/dw1000.h>
 #include <stdio.h>
 
 
@@ -367,23 +368,24 @@ int main(void) {
     int ret = 0;
     LOG_INF("Starting ...");
 
+
+    LOG_INF("Getting node id");
+    int16_t signed_node_id = 0; //get_node_number(get_own_node_id());
+
+    if (signed_node_id < 0) {
+        LOG_INF("Node number NOT FOUND! Shutting down :( I am: 0x%04hx", get_own_node_id());
+        return 0;
+    }
+
+    own_number = signed_node_id;
+
     LOG_INF("Initialize ieee802.15.4");
-    ieee802154_dev = device_get_binding(CONFIG_NET_CONFIG_IEEE802154_DEV_NAME);
+    ieee802154_dev = DEVICE_DT_GET(DT_CHOSEN(zephyr_ieee802154));
 
     if (!ieee802154_dev) {
         LOG_ERR("Cannot get ieee 802.15.4 device");
         return false;
     }
-
-    LOG_INF("Getting node id");
-    int16_t signed_node_id = get_node_number(get_own_node_id());
-
-    if (signed_node_id < 0) {
-        LOG_INF("Node number NOT FOUND! Shutting down :( I am: 0x%04hx", get_own_node_id());
-        return;
-    }
-
-    own_number = signed_node_id;
 
     // prepare msg buffer
     {
@@ -611,7 +613,7 @@ int main(void) {
 }
 
 
-enum net_verdict ieee802154_radio_handle_ack(struct net_if *iface, struct net_pkt *pkt)
+enum net_verdict ieee802154_handle_ack(struct net_if *iface, struct net_pkt *pkt)
 {
     return NET_CONTINUE;
 }

@@ -1,9 +1,9 @@
-#include <logging/log.h>
-#include <zephyr.h>
+#include <zephyr/logging/log.h>
+#include <zephyr/zephyr.h>
 
-#include <net/net_core.h>
-#include <net/ieee802154_radio.h>
-#include <drivers/ieee802154/dw1000.h>
+#include <zephyr/net/net_core.h>
+#include <zephyr/net/ieee802154_radio.h>
+#include <zephyr/drivers/ieee802154/dw1000.h>
 #include <stdio.h>
 
 #include "history.h"

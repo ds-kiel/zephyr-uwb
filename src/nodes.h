@@ -2,7 +2,7 @@
 #define NODE_NUMBERS_H
 
 #include <arm_math_f16.h>
-#include <logging/log.h>
+#include <zephyr/logging/log.h>
 #include <stdio.h>
 
 #define NUM_NODES 2

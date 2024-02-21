@@ -1,5 +1,5 @@
-#include <zephyr.h>
-#include <drivers/hwinfo.h>
+#include <zephyr/zephyr.h>
+#include <zephyr/drivers/hwinfo.h>
 #include "nodes.h"
 
 

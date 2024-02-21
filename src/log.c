@@ -1,7 +1,7 @@
 
-#include <drivers/uart.h>
-#include <zephyr.h>
-#include <logging/log.h>
+#include <zephyr/drivers/uart.h>
+#include <zephyr/zephyr.h>
+#include <zephyr/logging/log.h>
 #include "log.h"
 #include "nodes.h"
 
