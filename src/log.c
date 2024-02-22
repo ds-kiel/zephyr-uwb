@@ -5,7 +5,7 @@
 #include "log.h"
 #include "nodes.h"
 
-#define LOG_BUF_SIZE (8192)
+#define LOG_BUF_SIZE (2048)
 
 LOG_MODULE_REGISTER(logging);
 
