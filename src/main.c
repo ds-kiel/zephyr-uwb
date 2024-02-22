@@ -505,7 +505,7 @@ int main(void) {
             int16_t  slot_tx_id           = schedule_get_tx_node_number(cur_round, upcoming_slot);
 
             // sleep until slot start
-            sleep_until_dwt_ts(((uint64_t)upcoming_slot_tx_ts-(uint64_t)UUS_TO_DWT_TS(TX_BUFFER_DELAY_UUS))& DWT_TS_MASK);
+            //sleep_until_dwt_ts(((uint64_t)upcoming_slot_tx_ts-(uint64_t)UUS_TO_DWT_TS(TX_BUFFER_DELAY_UUS))& DWT_TS_MASK);
 
             if (own_number == slot_tx_id) { // check whether this slot is for us
                 k_thread_priority_set(k_current_get(), K_HIGHEST_THREAD_PRIO); // we are a bit time sensitive from here on now ;)
