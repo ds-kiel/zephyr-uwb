@@ -51,7 +51,7 @@ LOG_MODULE_REGISTER(main);
 #define EXP_POWER_STATES 10
 #define EXP_PING_PONG 20
 
-#define CURRENT_EXPERIMENT EXP_RESP_DELAYS
+#define CURRENT_EXPERIMENT EXP_TWR
 
 
 //#define DB_START(NAME) uint64_t dbts_start_##NAME = dwt_system_ts(ieee802154_dev);
