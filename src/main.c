@@ -600,7 +600,7 @@ int main(void) {
         int64_t wanted_dur_ms = FLUSH_MS_PER_SLOT * NUM_SLOTS;
         int64_t actual_dur_ms = k_uptime_get() - before_flush_ms;
 
-        LOG_INF("Flushing count %d, wanted ms %lld, actual ms %lld", log_count, wanted_dur_ms, actual_dur_ms);
+        LOG_WRN("Flushing count %d, wanted ms %lld, actual ms %lld, round %u", log_count, wanted_dur_ms, actual_dur_ms, cur_round-1); //-1 because we already increased the round
         if (actual_dur_ms < wanted_dur_ms) {
             k_sleep(K_MSEC(wanted_dur_ms - actual_dur_ms));
         } else {
