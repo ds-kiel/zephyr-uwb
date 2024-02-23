@@ -523,6 +523,8 @@ int main(void) {
                         LOG_WRN("COULD NOT ALLOCATE MEMORY FOR PACKET!");
                     }
                 }
+                //TODO: Use net_buf_reset or even better: do not rely on this buffer at all and already transmit bytes via SPI?
+                // Actually, it might be fast to write the TX buffer and directly schedule the tx event together but not sure
 
                 buf = net_buf_frag_last(pkt->buffer);
                 len = net_pkt_get_len(pkt);
