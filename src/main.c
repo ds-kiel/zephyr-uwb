@@ -504,10 +504,12 @@ int main(void) {
             uint64_t upcoming_slot_dur_ts = schedule_get_slot_duration_dwt_ts(cur_round, upcoming_slot);
             int16_t  slot_tx_id           = schedule_get_tx_node_number(cur_round, upcoming_slot);
 
-            // sleep until slot start
-            //sleep_until_dwt_ts(((uint64_t)upcoming_slot_tx_ts-(uint64_t)UUS_TO_DWT_TS(TX_BUFFER_DELAY_UUS))& DWT_TS_MASK);
-
-            if (own_number == slot_tx_id) { // check whether this slot is for us
+            // check whether this slot is for us
+            // sleep until slot start when we are NOT transmitting
+            if (own_number != slot_tx_id) {
+                sleep_until_dwt_ts(((uint64_t)upcoming_slot_tx_ts-(uint64_t)UUS_TO_DWT_TS(TX_BUFFER_DELAY_UUS))& DWT_TS_MASK);
+            }
+            else {
                 k_thread_priority_set(k_current_get(), K_HIGHEST_THREAD_PRIO); // we are a bit time sensitive from here on now ;)
 
                 struct net_pkt *pkt = NULL;
