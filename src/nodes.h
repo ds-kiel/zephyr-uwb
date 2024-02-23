@@ -5,9 +5,7 @@
 #include <zephyr/logging/log.h>
 #include <stdio.h>
 
-#define NUM_NODES 2
-
-
+#define NUM_NODES CONFIG_NUM_NODES
 
 #define PAIRS(X) (((X)*((X)-1))/2)
 #define NUM_PAIRS (PAIRS(NUM_NODES))

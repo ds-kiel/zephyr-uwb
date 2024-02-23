@@ -1,6 +1,7 @@
 #include "nodes.h"
 // ----------------------
 // Definition of Testbed lille
+#if CONFIG_TESTBED_LILLE
 #if NUM_NODES>14
 #error Testbed LILLE only has 14 nodes
 #elif NUM_NODES<14
@@ -131,3 +132,5 @@ float32_t node_distances[NUM_PAIRS] = {
 	 2.4, // dwm1001-14 to dwm1001-12
 	 2.0809, // dwm1001-14 to dwm1001-13
 };
+
+#endif

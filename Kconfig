@@ -1,0 +1,23 @@
+config NUM_NODES
+    int "Number of nodes"
+    default 2
+
+choice TESTBED
+    bool "Testbed"
+    default TESTBED_KIEL
+
+config TESTBED_KIEL
+    bool "TESTBED_KIEL"
+
+config TESTBED_LILLE
+    bool "TESTBED_LILLE"
+
+config TESTBED_TRENTO_A
+    bool "TESTBED_TRENTO_A"
+
+config TESTBED_TRENTO_B
+    bool "TESTBED_TRENTO_B"
+endchoice
+
+
+source "Kconfig.zephyr"

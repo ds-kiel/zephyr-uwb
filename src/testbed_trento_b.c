@@ -1,4 +1,5 @@
 #include "nodes.h"
+#if CONFIG_TESTBED_TRENTO_B
 // ----------------------
 // Definition of Testbed trento_b
 #if NUM_NODES>14
@@ -131,3 +132,4 @@ float32_t node_distances[NUM_PAIRS] = {
 	 3.8607, // dwm1001-173 to dwm1001-171
 	 2.1384, // dwm1001-173 to dwm1001-172
 };
+#endif

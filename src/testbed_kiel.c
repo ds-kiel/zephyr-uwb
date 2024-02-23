@@ -1,11 +1,15 @@
 #include "nodes.h"
 // ----------------------
 // Definition of Testbed lille
-#if NUM_NODES>10
-#error Testbed Kiel only has
-#elif NUM_NODES<10
-#warning Testbed LILLE has more nodes available (14 in total)
+
+#if CONFIG_TESTBED_KIEL
+
+#if NUM_NODES>6
+#error Testbed Kiel only has 6 nodes
+#elif NUM_NODES<6
+#warning Testbed Kiel has more nodes available (6 in total)
 #endif
+
 uint16_t node_ids[NUM_NODES] = {
     0x2b75, // profiled-gateway-2:
     0x0320, // profiled-gateway-1:
@@ -27,3 +31,5 @@ int16_t node_factory_antenna_delay_offsets[NUM_NODES] = {
 float32_t node_distances[NUM_PAIRS] = {
     0x00
 };
+
+#endif

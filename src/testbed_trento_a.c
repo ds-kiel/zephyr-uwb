@@ -1,6 +1,7 @@
 #include "nodes.h"
 // ----------------------
 // Definition of Testbed trento_a
+#if CONFIG_TESTBED_TRENTO_A
 #if NUM_NODES>7
 #error Testbed TRENTO_A only has 7 nodes
 #elif NUM_NODES<7
@@ -47,3 +48,4 @@ float32_t node_distances[NUM_PAIRS] = {
 	 5.9804, // dwm1001-7 to dwm1001-5
 	 2.9806, // dwm1001-7 to dwm1001-6
 };
+#endif
