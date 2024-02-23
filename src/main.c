@@ -19,7 +19,7 @@ LOG_MODULE_REGISTER(main);
 #define NUM_ROUNDS (1200)
 
 #define INITIAL_DELAY_MS 5000
-#define SLOT_DUR_UUS 2000
+#define SLOT_DUR_UUS 800
 
  // only relevant if we are earlier
 #define TX_BUFFER_DELAY_UUS 1200
