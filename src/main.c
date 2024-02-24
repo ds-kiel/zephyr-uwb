@@ -557,7 +557,7 @@ int main(void) {
                 }
 
                 // WE NEED COOP PRIORITY otherwise we are verryb likely to miss our tx window
-                k_thread_priority_set(k_current_get(), K_HIGHEST_APPLICATION_THREAD_PRIO); // we are less time sensitive from here on now ;)
+                k_thread_priority_set(k_current_get(), CONFIG_MAIN_THREAD_PRIORITY); // we are less time sensitive from here on now ;)
                 net_pkt_unref(pkt);
 
                 uint64_t actual_tx_ts = (((uint64_t)(planned_tx_short_ts & 0xFFFFFFFEUL)) << 8) + antenna_delay;
