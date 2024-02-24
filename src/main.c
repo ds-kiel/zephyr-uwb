@@ -1,5 +1,5 @@
 #include <zephyr/logging/log.h>
-#include <zephyr/zephyr.h>
+#include <zephyr/kernel.h>
 
 #include <zephyr/devicetree.h>
 #include <zephyr/net/ieee802154_radio.h>
