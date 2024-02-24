@@ -25,6 +25,8 @@ LOG_MODULE_REGISTER(main);
 #define TX_BUFFER_DELAY_UUS 1200
  // TODO default value is 500
 #define TX_INVOKE_MIN_DELAY_UUS 800
+// TODO: this reduced about 20 to 50us from the tx time
+#define PREVENT_LATE_TX 0
 
 // This delays has to be below 17/2 s, logging of one slot message takes at least 4ms
 #define PRE_ROUND_DELAY_UUS 1000000
@@ -547,15 +549,18 @@ int main(void) {
                 uint32_t planned_tx_short_ts = upcoming_slot_tx_ts >> 8;
                 dwt_set_delayed_tx_short_ts(ieee802154_dev, planned_tx_short_ts);
 
-                uint64_t tx_invoke_ts = dwt_system_ts(ieee802154_dev);
+                bool late_tx = false;
+                #if PREVENT_LATE_TX
+                    uint64_t tx_invoke_ts = dwt_system_ts(ieee802154_dev);
+                    // Check that we are not overflowing, i.e. that we are not too late with the tx
+                    // invocation here! (otherwise we will get a warning which destroys all of our
+                    // timing...)
+                    late_tx = (uint64_t)(upcoming_slot_tx_ts-(tx_invoke_ts+DWT_TS_TO_US(TX_INVOKE_MIN_DELAY_UUS))) < DWT_TS_MASK/2;
+                #endif
 
-                // Check that we are not overflowing, i.e. that we are not too late with the tx
-                // invocation here! (otherwise we will get a warning which destroys all of our
-                // timing...)
-                if ((uint64_t)(upcoming_slot_tx_ts-(tx_invoke_ts+DWT_TS_TO_US(TX_INVOKE_MIN_DELAY_UUS))) < DWT_TS_MASK/2) {
+                if (!late_tx) {
                     ret = radio_api->tx(ieee802154_dev, IEEE802154_TX_MODE_TXTIME, pkt, buf);
                 }
-
                 // WE NEED COOP PRIORITY otherwise we are verryb likely to miss our tx window
                 k_thread_priority_set(k_current_get(), CONFIG_MAIN_THREAD_PRIORITY); // we are less time sensitive from here on now ;)
                 net_pkt_unref(pkt);
