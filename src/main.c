@@ -19,14 +19,22 @@ LOG_MODULE_REGISTER(main);
 #define NUM_ROUNDS (1200)
 
 #define INITIAL_DELAY_MS 5000
-#define SLOT_DUR_UUS 800
 
- // only relevant if we are earlier
-#define TX_BUFFER_DELAY_UUS 1200
+// (1000-25*<multiplier>) with multiplier 11 was the last one working using a TX_BUFFER_DELAY_UUS of 325us, we add 25usec to be sure as I got some half delay warnings
+#define SLOT_DUR_UUS 750
+
+
+// only relevant if we are earlier (1000-25*<multiplier>), 27 was the last working multiplier, i.e., 300 us was not working anymore, we add 25usec to be sure as I got some half delay warnings
+#define TX_BUFFER_DELAY_UUS 350
  // TODO default value is 500
-#define TX_INVOKE_MIN_DELAY_UUS 800
+
+
 // TODO: this reduced about 20 to 50us from the tx time
 #define PREVENT_LATE_TX 0
+
+#if PREVENT_LATE_TX
+#define TX_BUFFER_DELAY_UUS (325+25)
+#endif
 
 // This delays has to be below 17/2 s, logging of one slot message takes at least 4ms
 #define PRE_ROUND_DELAY_UUS 1000000
@@ -53,8 +61,7 @@ LOG_MODULE_REGISTER(main);
 #define EXP_POWER_STATES 10
 #define EXP_PING_PONG 20
 
-#define CURRENT_EXPERIMENT EXP_TWR
-
+#define CURRENT_EXPERIMENT EXP_PING_PONG
 
 //#define DB_START(NAME) uint64_t dbts_start_##NAME = dwt_system_ts(ieee802154_dev);
 //#define DB_END(NAME) uint64_t dbts_end_##NAME = dwt_system_ts(ieee802154_dev);
@@ -242,12 +249,12 @@ static void busy_wait_until_dwt_ts(uint64_t wanted_ts) {
     }
 }
 // This function execution on its own has an overhead of roughly 83 us. We add a bit of buffer time to be kind of sure to schedule stuff correctly
-#define DWT_SLEEP_DWT_CORRECTION_US (100+50)
+#define DWT_SLEEP_DWT_CORRECTION_US (125)
 static void sleep_until_dwt_ts(uint64_t wanted_ts) {
     uint64_t init_ts = dwt_system_ts(ieee802154_dev);
     uint64_t diff = DWT_TS_TO_US(((uint64_t)(wanted_ts-init_ts))&DWT_TS_MASK); // This should wrap around nicely
 
-    // We check that our sleep call might not delay us too much
+    // We check that our sleep call might not delay us too much, i.e., we do not want to sleep too long!
     if (diff > DWT_SLEEP_DWT_CORRECTION_US && diff < DWT_TS_TO_US(DWT_TS_MASK/2)) {
         k_usleep(diff - DWT_SLEEP_DWT_CORRECTION_US);
     }
@@ -456,29 +463,29 @@ int main(void) {
             uint64_t ts1 = dwt_system_ts(ieee802154_dev);
             uint64_t ts2 = dwt_system_ts(ieee802154_dev);
             int64_t diff_us = DWT_TS_TO_US((ts2-ts1)&DWT_TS_MASK);
-            LOG_INF("dwt_system_ts calls ts1  %llu, ts2: %llu, diff us %lld", ts1, ts2, diff_us);
+            LOG_WRN("dwt_system_ts calls ts1  %llu, ts2: %llu, diff us %lld", ts1, ts2, diff_us);
         }
     }
 
-//    {
-//        uint64_t init_ts = dwt_system_ts(ieee802154_dev);
-//        uint64_t wanted_ts = init_ts + UUS_TO_DWT_TS(100);
-//        sleep_until_dwt_ts(wanted_ts);
-//        uint64_t other_ts = dwt_system_ts(ieee802154_dev);
-//
-//        int64_t diff = (int64_t)other_ts - (int64_t)wanted_ts;
-//        int64_t diff_us = DWT_TS_TO_US(diff);
-//        LOG_INF("Blocking DWT TS initial  %llu, wanted: %llu, actual: %llu, diff %lld, diff us %lld", init_ts, wanted_ts, other_ts, diff, diff_us);
-//
-//        init_ts = dwt_system_ts(ieee802154_dev);
-//        wanted_ts = init_ts + UUS_TO_DWT_TS(TX_BUFFER_DELAY_UUS);
-//        sleep_until_dwt_ts(wanted_ts);
-//        other_ts = dwt_system_ts(ieee802154_dev);
-//
-//        diff = (int64_t)other_ts - (int64_t)wanted_ts;
-//        diff_us = DWT_TS_TO_US(diff);
-//        LOG_INF("SLEEPING DWT TS initial  %llu, wanted: %llu, actual: %llu, diff %lld, diff us %lld", init_ts, wanted_ts, other_ts, diff, diff_us);
-//    }
+    {
+        uint64_t init_ts = dwt_system_ts(ieee802154_dev);
+        uint64_t wanted_ts = init_ts + UUS_TO_DWT_TS(100);
+        sleep_until_dwt_ts(wanted_ts);
+        uint64_t other_ts = dwt_system_ts(ieee802154_dev);
+
+        int64_t diff = (int64_t)other_ts - (int64_t)wanted_ts;
+        int64_t diff_us = DWT_TS_TO_US(diff);
+        //LOG_WRN("Blocking DWT TS initial  %llu, wanted: %llu, actual: %llu, diff %lld, diff us %lld", init_ts, wanted_ts, other_ts, diff, diff_us);
+
+        init_ts = dwt_system_ts(ieee802154_dev);
+        wanted_ts = init_ts + UUS_TO_DWT_TS(TX_BUFFER_DELAY_UUS);
+        sleep_until_dwt_ts(wanted_ts);
+        other_ts = dwt_system_ts(ieee802154_dev);
+
+        diff = (int64_t)other_ts - (int64_t)wanted_ts;
+        diff_us = DWT_TS_TO_US(diff);
+        LOG_WRN("SLEEPING DWT TS initial  %llu, wanted: %llu, actual: %llu, diff %lld, diff us %lld", init_ts, wanted_ts, other_ts, diff, diff_us);
+    }
 
 
     uint16_t antenna_delay = dwt_antenna_delay_tx(ieee802154_dev);
@@ -508,10 +515,10 @@ int main(void) {
 
             // check whether this slot is for us
             // sleep until slot start when we are NOT transmitting
-            if (own_number != slot_tx_id) {
+            {
                 sleep_until_dwt_ts(((uint64_t)upcoming_slot_tx_ts-(uint64_t)UUS_TO_DWT_TS(TX_BUFFER_DELAY_UUS))& DWT_TS_MASK);
             }
-            else {
+            if(own_number == slot_tx_id) {
                 k_thread_priority_set(k_current_get(), K_HIGHEST_THREAD_PRIO); // we are a bit time sensitive from here on now ;)
 
                 struct net_pkt *pkt = NULL;
@@ -590,6 +597,7 @@ int main(void) {
             snprintf(buf, sizeof(buf), "{\"event\": \"round_end\", \"own_number\": %hhu, \"round\": %u, \"round_start_us\": %llu, \"cur_us\": %llu, \"actual_round_start_us\": %llu}\n", own_number, cur_round, DWT_TS_TO_US(round_start_dwt_ts), DWT_TS_TO_US(dwt_system_ts(ieee802154_dev)), DWT_TS_TO_US(actual_round_start));
             log_out(buf);
         }
+
 
         last_round_start_dwt_ts = round_start_dwt_ts;
         upcoming_slot = 0; // we restart the round
