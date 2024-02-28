@@ -123,6 +123,7 @@ struct dwt_context {
 
     uint64_t rx_ts;
     uint8_t rx_ttcko_rc_phase;
+    bool delayed_rx_enabled;
 };
 
 static const struct dwt_hi_cfg dw1000_0_config = {
@@ -401,7 +402,7 @@ static inline void dwt_irq_handle_rx_cca(const struct device *dev)
                       DWT_SYS_STATUS_ALL_RX_GOOD);
 }
 
-static inline void dwt_irq_handle_rx(const struct device *dev, uint32_t sys_stat)
+static inline void dwt_read_rx(const struct device *dev, uint32_t sys_stat)
 {
     struct dwt_context *ctx = dev->data;
     struct net_pkt *pkt = NULL;
@@ -416,9 +417,6 @@ static inline void dwt_irq_handle_rx(const struct device *dev, uint32_t sys_stat
     uint16_t pkt_len;
     uint8_t *fctrl;
     int8_t rx_level = INT8_MIN;
-
-    LOG_DBG("RX OK event, SYS_STATUS 0x%08x", sys_stat);
-    flags_to_clear = sys_stat & DWT_SYS_STATUS_ALL_RX_GOOD;
 
     rx_finfo = dwt_reg_read_u32(dev, DWT_RX_FINFO_ID, DWT_RX_FINFO_OFFSET);
     pkt_len = rx_finfo & DWT_RX_FINFO_RXFLEN_MASK;
@@ -440,7 +438,7 @@ static inline void dwt_irq_handle_rx(const struct device *dev, uint32_t sys_stat
     dwt_register_read(dev, DWT_RX_FQUAL_ID, 0, sizeof(rx_inf_reg),
                       (uint8_t *)&rx_inf_reg);
     net_buf_add(pkt->buffer, pkt_len);
-    fctrl = pkt->buffer->data;
+    fctrl = pkt->buffer->data; //TODO: This is actually used in the ieee802154_radio_handle_ack function!
 
     /*
      * Get Ranging tracking offset and tracking interval
@@ -491,25 +489,14 @@ static inline void dwt_irq_handle_rx(const struct device *dev, uint32_t sys_stat
         //ctx->rx_pacc = rx_pacc;
         //ctx->rx_a_const = a_const
 
-#if defined(CONFIG_NEWLIB_LIBC)
-        /* From 4.7.2 Estimating the receive signal power */
-		rx_level = 10.0 * log10f(cir_pwr * BIT(17) /
-					 (rx_pacc * rx_pacc)) - a_const;
-#endif
-    }
+    #if defined(CONFIG_NEWLIB_LIBC)
+            /* From 4.7.2 Estimating the receive signal power */
+            rx_level = 10.0 * log10f(cir_pwr * BIT(17) /
+                         (rx_pacc * rx_pacc)) - a_const;
+    #endif
+        }
 
-    net_pkt_set_ieee802154_rssi(pkt, rx_level);
-
-    /*
-     * Workaround for AAT status bit issue,
-     * From 5.3.5 Host Notification in DW1000 User Manual:
-     * "Note: there is a situation that can result in the AAT bit being set
-     * for the current frame as a result of a previous frame that was
-     * received and rejected due to frame filtering."
-     */
-    if ((sys_stat & DWT_SYS_STATUS_AAT) && ((fctrl[0] & 0x20) == 0)) {
-        flags_to_clear |= DWT_SYS_STATUS_AAT;
-    }
+        net_pkt_set_ieee802154_rssi(pkt, rx_level);
 
     if (ieee802154_radio_handle_ack(ctx->iface, pkt) == NET_OK) {
         LOG_INF("ACK packet handled");
@@ -522,7 +509,7 @@ static inline void dwt_irq_handle_rx(const struct device *dev, uint32_t sys_stat
     LOG_HEXDUMP_DBG(pkt->buffer->data, pkt_len, "RX buffer:");
 
     if (net_recv_data(ctx->iface, pkt) == NET_OK) {
-        goto rx_out_enable_rx;
+        goto rx_out_enable_rx; // TODO this code is still in the other handler
     } else {
         LOG_DBG("Packet dropped by NET stack");
     }
@@ -532,17 +519,51 @@ static inline void dwt_irq_handle_rx(const struct device *dev, uint32_t sys_stat
         net_pkt_unref(pkt);
     }
 
-    rx_out_enable_rx:
-    dwt_reg_write_u32(dev, DWT_SYS_STATUS_ID, 0, flags_to_clear);
-    LOG_DBG("Cleared SYS_STATUS flags 0x%08x", flags_to_clear);
-    if (atomic_test_bit(&ctx->state, DWT_STATE_RX_DEF_ON)) {
-        /*
-         * Re-enable reception but in contrast to dwt_enable_rx()
-         * without to read SYS_STATUS and set delayed option.
-         */
-        dwt_reg_write_u16(dev, DWT_SYS_CTRL_ID, DWT_SYS_CTRL_OFFSET,
-                          DWT_SYS_CTRL_RXENAB);
+}
+
+static inline void dwt_irq_handle_rx(const struct device *dev, uint32_t sys_stat)
+{
+    struct dwt_context *ctx = dev->data;
+    struct net_pkt *pkt = NULL;
+    struct dwt_rx_info_regs rx_inf_reg;
+    float a_const;
+    uint32_t rx_finfo;
+    uint32_t ttcki;
+    uint32_t rx_pacc;
+    uint32_t cir_pwr;
+    uint32_t flags_to_clear;
+    int32_t ttcko;
+    uint16_t pkt_len;
+    uint8_t *fctrl;
+
+    LOG_DBG("RX OK event, SYS_STATUS 0x%08x", sys_stat);
+    flags_to_clear = sys_stat & DWT_SYS_STATUS_ALL_RX_GOOD;
+
+    /*
+     * Workaround for AAT status bit issue,
+     * From 5.3.5 Host Notification in DW1000 User Manual:
+     * "Note: there is a situation that can result in the AAT bit being set
+     * for the current frame as a result of a previous frame that was
+     * received and rejected due to frame filtering."
+     */
+    if ((sys_stat & DWT_SYS_STATUS_AAT) && ((fctrl[0] & 0x20) == 0)) {
+        flags_to_clear |= DWT_SYS_STATUS_AAT;
     }
+
+
+
+
+    rx_out_enable_rx:
+        dwt_reg_write_u32(dev, DWT_SYS_STATUS_ID, 0, flags_to_clear);
+        LOG_DBG("Cleared SYS_STATUS flags 0x%08x", flags_to_clear);
+        if (atomic_test_bit(&ctx->state, DWT_STATE_RX_DEF_ON)) {
+            /*
+             * Re-enable reception but in contrast to dwt_enable_rx()
+             * without to read SYS_STATUS and set delayed option.
+             */
+            dwt_reg_write_u16(dev, DWT_SYS_CTRL_ID, DWT_SYS_CTRL_OFFSET,
+                              DWT_SYS_CTRL_RXENAB);
+        }
 }
 
 static void dwt_irq_handle_tx(const struct device *dev, uint32_t sys_stat)
@@ -638,7 +659,11 @@ static void dwt_irq_work_handler(struct k_work *item)
         if (atomic_test_bit(&ctx->state, DWT_STATE_CCA)) {
             dwt_irq_handle_rx_cca(dev);
         } else {
-            dwt_irq_handle_rx(dev, sys_stat);
+
+            if(dwt_test_rx(dev, sys_stat) == DWT_RX_DIRECT) {
+                dwt_irq_handle_rx(dev, sys_stat);
+            }
+            // else: we expect that the rx handler is calle by the application when appropriate
         }
     }
 
@@ -818,7 +843,7 @@ static int dwt_set_power(const struct device *dev, int16_t dbm)
 }
 
 
-static int dwt_tx(const struct device *dev, enum ieee802154_tx_mode tx_mode,
+int dwt_init_tx(const struct device *dev, enum ieee802154_tx_mode tx_mode,
                   struct net_pkt *pkt, struct net_buf *frag)
 {
     struct dwt_context *ctx = dev->data;
@@ -907,10 +932,25 @@ static int dwt_tx(const struct device *dev, enum ieee802154_tx_mode tx_mode,
     }
 
     k_sem_give(&ctx->dev_lock);
+    return 0;
+
+    error:
+    atomic_clear_bit(&ctx->state, DWT_STATE_TX);
+    k_sem_give(&ctx->dev_lock);
+
+    return -EIO;
+}
+
+int dwt_finish_tx(const struct device *dev, enum ieee802154_tx_mode tx_mode,
+                  struct net_pkt *pkt)
+{
+    struct dwt_context *ctx = dev->data;
+
     /* Wait for the TX confirmed event */
     k_sem_take(&ctx->phy_sem, K_FOREVER);
 
-    if (IS_ENABLED(CONFIG_NET_PKT_TIMESTAMP)) {
+    if (IS_ENABLED(CONFIG_NET_PKT_TIMESTAMP) && tx_mode != IEEE802154_TX_MODE_TXTIME) {
+        uint64_t tmp_fs;
         uint8_t ts_buf[sizeof(uint64_t)] = {0};
         struct net_ptp_time timestamp;
 
@@ -938,12 +978,19 @@ static int dwt_tx(const struct device *dev, enum ieee802154_tx_mode tx_mode,
     }
 
     return 0;
+}
 
-    error:
-    atomic_clear_bit(&ctx->state, DWT_STATE_TX);
-    k_sem_give(&ctx->dev_lock);
 
-    return -EIO;
+static int dwt_tx(const struct device *dev, enum ieee802154_tx_mode tx_mode,
+                  struct net_pkt *pkt, struct net_buf *frag)
+{
+
+int ret = dwt_init_tx(dev, tx_mode, pkt, frag);
+ if (ret) {
+    return ret;
+ }
+
+return dwt_finish_tx(dev, tx_mode, pkt);
 }
 
 void dwt_set_frame_filter(const struct device *dev,
@@ -1798,6 +1845,7 @@ uint8_t *dwt_get_mac(const struct device *dev)
 {
     return get_mac(dev);
 }
+
 
 static void dwt_iface_api_init(struct net_if *iface)
 {
