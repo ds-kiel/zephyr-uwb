@@ -51,18 +51,6 @@ LOG_MODULE_REGISTER(main);
 #define POST_ROUND_DELAY_UUS 2000000
 #define DWT_TS_MASK (0xFFFFFFFFFF)
 
-// Debug values
-//#define SLOT_DUR_UUS 2000000
-//#define TX_BUFFER_DELAY_UUS 500000
-
-#define EXP_TWR 0
-#define EXP_NOISE 1
-#define EXP_RESP_DELAYS 5
-#define EXP_POWER_STATES 10
-#define EXP_PING_PONG 20
-
-#define CURRENT_EXPERIMENT EXP_PING_PONG
-
 //#define DB_START(NAME) uint64_t dbts_start_##NAME = dwt_system_ts(ieee802154_dev);
 //#define DB_END(NAME) uint64_t dbts_end_##NAME = dwt_system_ts(ieee802154_dev);
 //#define DB_LOG(NAME) LOG_INF("TIMING " ## NAME ## "%lld us (start ts %llu, end ts %llu)", (int64_t)(DWT_TS_TO_US((dbts_##END-dbts_##START)&DWT_TS_MASK))-45, dbts_start_##NAME, dbts_end_##NAME); /* -45 because of the inherent 45 ms delay in the dwt_system_ts call */
@@ -75,6 +63,18 @@ LOG_MODULE_REGISTER(main);
 #define SW_START(NAME)
 #define SW_END(NAME)
 #define SW_LOG(NAME)
+
+// Debug values
+//#define SLOT_DUR_UUS 2000000
+//#define TX_BUFFER_DELAY_UUS 500000
+
+#define EXP_TWR 0
+#define EXP_NOISE 1
+#define EXP_RESP_DELAYS 5
+#define EXP_POWER_STATES 10
+#define EXP_PING_PONG 20
+
+#define CURRENT_EXPERIMENT EXP_PING_PONG
 
 #if CURRENT_EXPERIMENT == EXP_TWR
     #define SLOTS_PER_EXCHANGE 3
@@ -92,7 +92,7 @@ LOG_MODULE_REGISTER(main);
     // we only schedule 3 nodes for now due to long resp delays
 
     int64_t exp_delays[][2] =  {
-        {2, 98},
+        //{2, 98},
         {4, 96},
         {6, 94},
         {8, 92},
@@ -140,12 +140,109 @@ LOG_MODULE_REGISTER(main);
         {92, 8},
         {94, 6},
         {96, 4},
-        {98, 2},
+        //{98, 2},
     };
 
-    #define NUM_SLOTS ((SLOTS_PER_EXCHANGE*(sizeof(exp_delays)/sizeof(exp_delays[0])))+1)
-    #define RESP_DELAY_BASE_SLOT_DUR_UUS 400
+//    int64_t exp_delays[][2] =  {
+//        //{2, 98},
+//        {4, 96},
+//        {5, 95},
+//        {6, 94},
+//        {7, 93},
+//        {8, 92},
+//        {9, 91},
+//        {10, 90},
+//        {11, 89},
+//        {12, 88},
+//        {13, 87},
+//        {14, 86},
+//        {15, 85},
+//        {16, 84},
+//        {17, 83},
+//        {18, 82},
+//        {19, 81},
+//        {20, 80},
+//        {21, 79},
+//        {22, 78},
+//        {23, 77},
+//        {24, 76},
+//        {25, 75},
+//        {26, 74},
+//        {27, 73},
+//        {28, 72},
+//        {29, 71},
+//        {30, 70},
+//        {31, 69},
+//        {32, 68},
+//        {33, 67},
+//        {34, 66},
+//        {35, 65},
+//        {36, 64},
+//        {37, 63},
+//        {38, 62},
+//        {39, 61},
+//        {40, 60},
+//        {41, 59},
+//        {42, 58},
+//        {43, 57},
+//        {44, 56},
+//        {45, 55},
+//        {46, 54},
+//        {47, 53},
+//        {48, 52},
+//        {49, 51},
+//        {50, 50},
+//        {51, 49},
+//        {52, 48},
+//        {53, 47},
+//        {54, 46},
+//        {55, 45},
+//        {56, 44},
+//        {57, 43},
+//        {58, 42},
+//        {59, 41},
+//        {60, 40},
+//        {61, 39},
+//        {62, 38},
+//        {63, 37},
+//        {64, 36},
+//        {65, 35},
+//        {66, 34},
+//        {67, 33},
+//        {68, 32},
+//        {69, 31},
+//        {70, 30},
+//        {71, 29},
+//        {72, 28},
+//        {73, 27},
+//        {74, 26},
+//        {75, 25},
+//        {76, 24},
+//        {77, 23},
+//        {78, 22},
+//        {79, 21},
+//        {80, 20},
+//        {81, 19},
+//        {82, 18},
+//        {83, 17},
+//        {84, 16},
+//        {85, 15},
+//        {86, 14},
+//        {87, 13},
+//        {88, 12},
+//        {89, 11},
+//        {90, 10},
+//        {91, 9},
+//        {92, 8},
+//        {93, 7},
+//        {94, 6},
+//        {95, 5},
+//        {96, 4},
+//        //{98, 2},
+//    };
 
+    #define NUM_SLOTS ((SLOTS_PER_EXCHANGE*(sizeof(exp_delays)/sizeof(exp_delays[0])))+1)
+    #define RESP_DELAY_BASE_SLOT_DUR_UUS 200
 
 #elif CURRENT_EXPERIMENT == EXP_POWER_STATES
 #define NUM_SLOTS 0
@@ -358,6 +455,7 @@ int8_t schedule_get_tx_node_number(uint32_t r, uint32_t slot) {
         resp = (resp+1) % NUM_NODES; // we do not want to execute a ranging with ourselves..., actually modulo should not be necessary here anyway?
     }
 
+    // TODO: This calculation is not correct as we are using 201 slots atm.
     if (slot % 2 == 0) {
         return init;
     } else {
@@ -572,11 +670,13 @@ int main(void) {
                 k_thread_priority_set(k_current_get(), CONFIG_MAIN_THREAD_PRIORITY); // we are less time sensitive from here on now ;)
                 net_pkt_unref(pkt);
 
-                uint64_t actual_tx_ts = (((uint64_t)(planned_tx_short_ts & 0xFFFFFFFEUL)) << 8) + antenna_delay;
+                if (!ret) {
+                    uint64_t actual_tx_ts = (((uint64_t)(planned_tx_short_ts & 0xFFFFFFFEUL)) << 8) + antenna_delay;
 
-                // Note that the actual tx time is not the planned one for the slot!
-                if (history_save_tx(own_number, cur_round, upcoming_slot, actual_tx_ts)) {
-                    LOG_WRN("Could not save TX to history");
+                    // Note that the actual tx time is not the planned one for the slot!
+                    if (history_save_tx(own_number, cur_round, upcoming_slot, actual_tx_ts)) {
+                        LOG_WRN("Could not save TX to history");
+                    }
                 }
             }
 

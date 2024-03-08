@@ -11,6 +11,10 @@
 
 #define HISTORY_LENGTH 1420
 
+#if HISTORY_LENGTH < NUM_SLOTS
+#error "HISTORY_LENGTH < NUM_SLOTS"
+#endif
+
 K_SEM_DEFINE(hist_buf_sem, 1, 1);
 
 struct __attribute__((__packed__)) history_record {
