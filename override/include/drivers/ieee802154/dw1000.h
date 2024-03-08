@@ -2,20 +2,18 @@
  * Copyright (c) 2017 Intel Corporation
  *
  * SPDX-License-Identifier: Apache-2.0
+ * @author Patrick Rathje git@patrickrathje.de
  */
 
 #ifndef ZEPHYR_INCLUDE_DRIVERS_IEEE802154_DW1000_H_
 #define ZEPHYR_INCLUDE_DRIVERS_IEEE802154_DW1000_H_
 
-#include <device.h>
-
-#define DWT_RX_DIRECT 0
-#define DWT_RX_DELAYED 1
-
+#include <zephyr/device.h>
 
 /**
  * Set the upper 32 bits of the dwt timestamp
- * This method should be called just before the invocation of the tx method and from within the same thread
+ * This method should be called just before the invocation of the tx method and from within the same
+ * thread
  */
 void dwt_set_delayed_tx_short_ts(const struct device *dev, uint32_t short_ts);
 
@@ -50,20 +48,11 @@ void dwt_set_frame_filter(const struct device *dev, bool ff_enable, uint8_t ff_t
 
 uint8_t dwt_rx_ttcko_rc_phase(const struct device *dev);
 
-
 int dwt_readcarrierintegrator(const struct device *dev);
 float dwt_rx_clock_ratio_offset(const struct device *dev);
 
 uint8_t *dwt_get_mac(const struct device *dev);
 
 uint32_t dwt_otp_antenna_delay(const struct device *dev);
-
-int dwt_init_tx(const struct device *dev, enum ieee802154_tx_mode tx_mode,
-                  struct net_pkt *pkt, struct net_buf *frag);
-
-int dwt_finish_tx(const struct device *dev, enum ieee802154_tx_mode tx_mode,
-                  struct net_pkt *pkt);
-
-int dwt_set_delayed_rx_enabled(const struct device *dev, bool enabled);
 
 #endif /* ZEPHYR_INCLUDE_DRIVERS_IEEE802154_DW1000_H_ */
