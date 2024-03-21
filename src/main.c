@@ -122,12 +122,6 @@ float time_to_dist(float tof) {
 }
 
 #define UART_POLLING 0
-#define MAX_SUPPORTED_ROUND_LENGTH 15
-
-/* struct dstwr_ts */
-/* { */
-/*     uint64_t tx_init, rx_init, tx_resp, rx_resp, tx_final, rx_final; */
-/* }; */
 
 struct distance_estimate
 {
@@ -144,20 +138,14 @@ void calculate_distances_from_timestamps(const struct device *dev,  struct dwt_r
         uint8_t ranging_id;
         uint64_t rx_init, tx_resp, rx_resp, rx_final;
     } responder_timestamps[round_length];
-
     uint64_t tx_init, tx_final;
 
-    /* if(node_ranging_id != 0) { */
-    /*     return; */
-    /* } */
-
-    LOG_WRN("end of round: calculating distances");
+    LOG_DBG("Distance Callback");
 
     // swipe once through buffers to capture all ranging ids and associate them with a position in distances
     for(size_t i = 0; i < round_length; i++) {
         const struct dwt_ranging_frame_buffer *buffer = buffers[i];
         responder_timestamps[i].ranging_id = buffer->ranging_id;
-        LOG_WRN("found ranging id: %hhu", buffer->ranging_id);
     }
 
     // these we will reference more often
@@ -252,19 +240,30 @@ void calculate_distances_from_timestamps(const struct device *dev,  struct dwt_r
         }
     }
 
-    // print tx_init and tx_final
-    LOG_WRN("tx_init: %llx, tx_final: %llx", tx_init, tx_final);
-    // print other_timestamps and our timestamps
+    LOG_DBG("tx_init: %llx, tx_final: %llx", tx_init, tx_final);
+    // print vector of distances
+    char buf[256];
+    size_t written = 0;
+    written += snprintf(buf, sizeof(buf), "{\"e\":\"r\",\"i\":%hhu,\"t\":[", node_ranging_id);
+
     for(size_t i = 0; i < round_length; i++) {
         if(responder_timestamps[i].ranging_id != node_ranging_id) {
             struct _ts *ts = &responder_timestamps[i];
             int32_t tof = compute_prop_time(ts->rx_resp - tx_init, tx_final - ts->rx_resp, ts->rx_final - ts->tx_resp, ts->tx_resp - ts->rx_init);
             float dist = time_to_dist((float)tof);
 
-            LOG_WRN("Ranging id: %hhu, tof: %d, dist: %dcm, rx_init: %llx, tx_resp: %llx, rx_resp: %llx, rx_final: %llx", ts->ranging_id, tof, (int32_t) (dist * 100), ts->rx_init, ts->tx_resp, ts->rx_resp, ts->rx_final);
-/* compute_prop_time(int32_t initiator_roundtrip, int32_t initiator_reply, int32_t replier_roundtrip, int32_t replier_reply) {             */
+            // add to return distances
+            distances[i].ranging_id = ts->ranging_id;
+            distances[i].dist = dist;
+            distances[i].quality = 1.0;
+
+            LOG_DBG("Ranging id: %hhu, tof: %d, dist: %dcm, rx_init: %llx, tx_resp: %llx, rx_resp: %llx, rx_final: %llx", ts->ranging_id, tof, (int32_t) (dist * 100), ts->rx_init, ts->tx_resp, ts->rx_resp, ts->rx_final);
+            written += snprintf(buf+written, sizeof(buf)-written, "{\"i\":%hhu,\"d\":%d,\"q\":%d}", ts->ranging_id, (int32_t) (dist * 100), 100);
         }
     }
+    snprintf(buf+written, sizeof(buf)-written, "]}\r\n");
+
+    LOG_WRN("%s", buf);
 
     // calculate distances
 }
@@ -345,7 +344,6 @@ int main(void) {
 
     LOG_WRN("Own number: %hhu", node_ranging_id);
 
-    /* dwt_set_frame_filter(ieee802154_dev, 0, 0); */
     radio_api = (struct ieee802154_radio_api *)ieee802154_dev->api;
 
     LOG_INF("GOT node id: %hhu", node_ranging_id);
@@ -363,29 +361,18 @@ int main(void) {
         return 0;
     }
 
-
-    // sleep INITIAL_DELAY_MS
     k_sleep(K_MSEC(INITIAL_DELAY_MS));
 
-    LOG_WRN("Starting main loop");
-
-    /* if(node_ranging_id == 0) { */
-    /*     k_sleep(K_MSEC(200)); */
-    /* } */
+    LOG_DBG("Starting main loop");
 
     uint32_t cur_round = 0;
-    // ----- Round Logic
-    while(cur_round < NUM_ROUNDS) {
-        LOG_WRN("Starting round %u", cur_round);
-        /* print_uart("Starting round\n"); */
-        if(node_ranging_id == 0) {
-            // wait 1 milli second
-            k_sleep(K_USEC(200));
-        }
 
+    while(cur_round < NUM_ROUNDS) {
+        LOG_DBG("Starting round %u", cur_round);
         dwt_mtm_ranging(ieee802154_dev, NUM_NODES, node_ranging_id, node_ranging_id);
 
-        k_sleep(K_MSEC(500));
+        /* k_sleep(K_MSEC(500)); */
+
         cur_round++;
     }
 }
