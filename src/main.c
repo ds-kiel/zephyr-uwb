@@ -14,7 +14,7 @@
 
 LOG_MODULE_REGISTER(main);
 
-#define NUM_ROUNDS (10000)
+#define NUM_ROUNDS (2500)
 #define INITIAL_DELAY_MS 5000
 
 #define USE_GPIO_DEBUG 1
@@ -130,8 +130,36 @@ struct distance_estimate
     float quality; // currently unused but useful in the future
 };
 
+float calculate_propagation_time_alternative(uint64_t tx_init, uint64_t rx_init, uint64_t tx_resp, uint64_t rx_resp, uint64_t tx_final, uint64_t rx_final) {
+    static float relative_drift_offset;
+    static int64_t other_duration, own_duration;
+    static int64_t round_duration_a, delay_duration_b;
+    /* static float drift_offset_int, two_tof_int; */
+    static int64_t drift_offset_int, two_tof_int;
+
+    own_duration   = tx_final - tx_init;
+    other_duration = rx_final - rx_init;
+
+    // factor determining whether B's clock runs faster or slower measured from the perspective of our clock
+    // a positive factor here means that the clock runs faster than ours
+    /* relative_drift_offset = (float)((int64_t)own_duration-(int64_t)other_duration) / (float)(other_duration); */
+    relative_drift_offset = (float)((int64_t)own_duration-(int64_t)other_duration) / (float)(other_duration);
+
+
+    round_duration_a = rx_resp - tx_init;
+    delay_duration_b = tx_resp - rx_init;
+
+    /* drift_offset_int = -relative_drift_offset * (float) delay_duration_b; */
+    drift_offset_int = round(-relative_drift_offset * (float) delay_duration_b);
+
+    /* two_tof_int = (float)round_duration_a - (float)delay_duration_b + drift_offset_int; */
+    two_tof_int = (int64_t)round_duration_a - (int64_t)delay_duration_b + drift_offset_int;
+
+    return ((float) two_tof_int) * 0.5;
+}
+
 // for now this function works on the assumption that all ranging round concluded without any dropped packages
-void calculate_distances_from_timestamps(const struct device *dev,  struct dwt_ranging_frame_buffer **buffers, size_t round_length, size_t repetitions)
+void calculate_distances_from_timestamps(const struct device *dev,  struct dwt_ranging_frame_buffer *frames, size_t round_length, size_t repetitions)
 {
     struct distance_estimate distances[round_length];
     struct _ts {
@@ -140,39 +168,37 @@ void calculate_distances_from_timestamps(const struct device *dev,  struct dwt_r
     } responder_timestamps[round_length];
     uint64_t tx_init, tx_final;
 
-    LOG_DBG("Distance Callback");
-
-    // swipe once through buffers to capture all ranging ids and associate them with a position in distances
+    // swipe once through frames to capture all ranging ids and associate them with a position in distances
     for(size_t i = 0; i < round_length; i++) {
-        const struct dwt_ranging_frame_buffer *buffer = buffers[i];
+        const struct dwt_ranging_frame_buffer *buffer = &frames[i];
         responder_timestamps[i].ranging_id = buffer->ranging_id;
     }
 
     // these we will reference more often
-    const struct dwt_ranging_frame_buffer *transmitted_initiation_buffer = NULL, *transmitted_finalization_buffer = NULL;
+    const struct dwt_ranging_frame_buffer *transmitted_initiation_frame = NULL, *transmitted_finalization_frame = NULL;
     size_t our_slot_offset;
 
     // first sweep find our initiation buffer and finalization response
     for(size_t i = round_length; i < repetitions*round_length; i++) {
-        const struct dwt_ranging_frame_buffer *buffer = buffers[i];
+        const struct dwt_ranging_frame_buffer *buffer = &frames[i];
         if(buffer->ranging_id == node_ranging_id) {
-            if(!transmitted_initiation_buffer) {
-                transmitted_initiation_buffer = buffer;
-                our_slot_offset = i;
+            if(!transmitted_initiation_frame) {
+                transmitted_initiation_frame = buffer;
+                our_slot_offset = i - round_length;
 
                 // grab tx_init from buffer
-                tx_init = transmitted_initiation_buffer->tx_ts.dwt_ts;
+                tx_init = transmitted_initiation_frame->tx_ts.dwt_ts;
             } else {
-                transmitted_finalization_buffer = buffer;
+                transmitted_finalization_frame = buffer;
                 // grab tx_final from buffer
-                tx_final = transmitted_finalization_buffer->tx_ts.dwt_ts;
+                tx_final = transmitted_finalization_frame->tx_ts.dwt_ts;
                 break;
             }
         }
     }
 
     // -- small sanity check
-    if(!transmitted_initiation_buffer || !transmitted_finalization_buffer) {
+    if(!transmitted_initiation_frame || !transmitted_finalization_frame) {
         LOG_ERR("Could not find initiation or finalization buffer");
         return;
     }
@@ -182,12 +208,17 @@ void calculate_distances_from_timestamps(const struct device *dev,  struct dwt_r
 
     // first find rx_init, tx_resp and rx_resp
     for(size_t i = 0; i < round_length; i++) {
-        const struct dwt_ranging_frame_buffer *received_initiation_frame = buffers[round_length + i];
-        const struct dwt_ranging_frame_buffer *received_finalization_frame = buffers[2*round_length + i];
-        uint8_t other_ranging_id = received_initiation_frame->ranging_id;
-
         if(i != our_slot_offset) {
             uint64_t rx_init = UINT64_MAX, tx_resp = UINT64_MAX, rx_resp = UINT64_MAX, rx_final = UINT64_MAX;
+
+            const struct dwt_ranging_frame_buffer *received_initiation_frame = &frames[round_length + i];
+            const struct dwt_ranging_frame_buffer *received_finalization_frame = &frames[2*round_length + i];
+            uint8_t other_ranging_id = received_initiation_frame->ranging_id;
+
+            if(received_initiation_frame->ranging_id != received_finalization_frame->ranging_id) {
+                LOG_ERR("Initiation and finalization frame do not match %hhu != %hhu", received_initiation_frame->ranging_id, received_finalization_frame->ranging_id);
+                return;
+            }
 
             // in any case the received initiation frame will contain rx_init
             for(size_t k = 0; k < received_initiation_frame->rx_ts_count; k++) {
@@ -209,9 +240,9 @@ void calculate_distances_from_timestamps(const struct device *dev,  struct dwt_r
                 tx_resp = received_finalization_frame->tx_ts.dwt_ts;
 
                 // in our own finalization frame we will find rx_resp
-                for(size_t k = 0; k < transmitted_finalization_buffer->rx_ts_count; k++) {
-                    if(transmitted_finalization_buffer->rx_ts[k].ranging_id == other_ranging_id) {
-                        rx_resp = transmitted_finalization_buffer->rx_ts[k].dwt_ts;
+                for(size_t k = 0; k < transmitted_finalization_frame->rx_ts_count; k++) {
+                    if(transmitted_finalization_frame->rx_ts[k].ranging_id == other_ranging_id) {
+                        rx_resp = transmitted_finalization_frame->rx_ts[k].dwt_ts;
                         break;
                     }
                 }
@@ -219,9 +250,9 @@ void calculate_distances_from_timestamps(const struct device *dev,  struct dwt_r
                 tx_resp = received_initiation_frame->tx_ts.dwt_ts;
 
                 // in our own initiation frame we will find rx_resp
-                for(size_t k = 0; k < transmitted_initiation_buffer->rx_ts_count; k++) {
-                    if(transmitted_initiation_buffer->rx_ts[k].ranging_id == other_ranging_id) {
-                        rx_resp = transmitted_initiation_buffer->rx_ts[k].dwt_ts;
+                for(size_t k = 0; k < transmitted_initiation_frame->rx_ts_count; k++) {
+                    if(transmitted_initiation_frame->rx_ts[k].ranging_id == other_ranging_id) {
+                        rx_resp = transmitted_initiation_frame->rx_ts[k].dwt_ts;
                         break;
                     }
                 }
@@ -229,7 +260,7 @@ void calculate_distances_from_timestamps(const struct device *dev,  struct dwt_r
 
             // store in responder_timestamps
             for(size_t k = 0; k < round_length; k++) {
-                if(responder_timestamps[k].ranging_id == received_initiation_frame->ranging_id) {
+                if(responder_timestamps[k].ranging_id == other_ranging_id) {
                     responder_timestamps[k].rx_init = rx_init;
                     responder_timestamps[k].tx_resp = tx_resp;
                     responder_timestamps[k].rx_resp = rx_resp;
@@ -249,7 +280,8 @@ void calculate_distances_from_timestamps(const struct device *dev,  struct dwt_r
     for(size_t i = 0; i < round_length; i++) {
         if(responder_timestamps[i].ranging_id != node_ranging_id) {
             struct _ts *ts = &responder_timestamps[i];
-            int32_t tof = compute_prop_time(ts->rx_resp - tx_init, tx_final - ts->rx_resp, ts->rx_final - ts->tx_resp, ts->tx_resp - ts->rx_init);
+            /* int32_t tof = compute_prop_time(ts->rx_resp - tx_init, tx_final - ts->rx_resp, ts->rx_final - ts->tx_resp, ts->tx_resp - ts->rx_init); */
+            float tof = calculate_propagation_time_alternative(tx_init, ts->rx_init, ts->tx_resp, ts->rx_resp, tx_final, ts->rx_final);
             float dist = time_to_dist((float)tof);
 
             // add to return distances
@@ -257,11 +289,20 @@ void calculate_distances_from_timestamps(const struct device *dev,  struct dwt_r
             distances[i].dist = dist;
             distances[i].quality = 1.0;
 
-            LOG_DBG("Ranging id: %hhu, tof: %d, dist: %dcm, rx_init: %llx, tx_resp: %llx, rx_resp: %llx, rx_final: %llx", ts->ranging_id, tof, (int32_t) (dist * 100), ts->rx_init, ts->tx_resp, ts->rx_resp, ts->rx_final);
-            written += snprintf(buf+written, sizeof(buf)-written, "{\"i\":%hhu,\"d\":%d,\"q\":%d}", ts->ranging_id, (int32_t) (dist * 100), 100);
+            LOG_DBG("Ranging id: %hhu, dist: %dcm, rx_init: %llx, tx_resp: %llx, rx_resp: %llx, rx_final: %llx", ts->ranging_id, (int32_t) (dist * 100), ts->rx_init, ts->tx_resp, ts->rx_resp, ts->rx_final);
+            written += snprintf(buf+written, sizeof(buf)-written, "{\"i\":%hhu,\"d\":%d,\"q\":%d}", ts->ranging_id, (int32_t) (dist * 100.0f), 100);
         }
     }
-    snprintf(buf+written, sizeof(buf)-written, "]}\r\n");
+
+    snprintf(buf+written, sizeof(buf)-written, "]}");
+
+
+    /* if(node_ranging_id != 3) { */
+    /*     return; */
+    /* } else { */
+    /*     // wait like 40 useconds */
+    /*     k_sleep(K_USEC(40)); */
+    /* } */
 
     LOG_WRN("%s", buf);
 
@@ -271,7 +312,7 @@ void calculate_distances_from_timestamps(const struct device *dev,  struct dwt_r
 /* static char serial_buf[1024]; */
 static atomic_t tx_state;
 
-/* void output_range_measurements(const struct device *dev, const struct dwt_ranging_frame_buffer **buffers) { */
+/* void output_range_measurements(const struct device *dev, const struct dwt_ranging_frame_buffer **frames) { */
 /*     int ret; */
 /*     size_t written = 0; */
 
@@ -369,9 +410,14 @@ int main(void) {
 
     while(cur_round < NUM_ROUNDS) {
         LOG_DBG("Starting round %u", cur_round);
+        // measure through cpu cycles how long the whole dwt_mtm_ranging cycle takes
+        /* uint32_t start = k_cycle_get_32(); */
         dwt_mtm_ranging(ieee802154_dev, NUM_NODES, node_ranging_id, node_ranging_id);
+        /* uint32_t end =  k_cycle_get_32(); */
 
-        /* k_sleep(K_MSEC(500)); */
+        /* LOG_WRN("Time in milliseconds: %u", (uint32_t)k_cyc_to_us_floor64(end - start) / 1000); */
+
+        k_sleep(K_MSEC(50));
 
         cur_round++;
     }
