@@ -7,6 +7,9 @@
 #include <zephyr/drivers/ieee802154/dw1000.h>
 #include <stdio.h>
 
+#include <zephyr/sys/timeutil.h>
+
+
 
 #include "nodes.h"
 #include "log.h"
@@ -78,6 +81,7 @@ static inline uint64_t ts_to_uint(const ts_t *ts) {
     return sys_get_le64(buf);
 }
 
+#define DWT_TS_MASK 0xFFFFFFFFFF
 #define DWT_TS_TO_US(X) (((X)*15650)/1000000000)
 #define UUS_TO_DWT_TS(X) (((uint64_t)X)*(uint64_t)65536)
 
@@ -85,9 +89,21 @@ static inline uint64_t ts_to_uint(const ts_t *ts) {
 
 static uint16_t node_ranging_id;
 
-#define UART_TX_RESULTS 0
+enum network_event {
+    RANGING_NONE,
+    RANGING_CHECK_TIMESYNC_GPIO,
+    RANGING_GLOSSY_SLOT,
+    RANGING_MTM_SLOT,
+    RANGING_MTM_ALOHA_SLOT
+};
 
-static K_SEM_DEFINE(uart_transfer_finished, 1, 1);
+enum network_event next_event = RANGING_NONE;
+
+#define UART_TX_RESULTS 0
+#define UART_POLLING 0
+
+K_SEM_DEFINE(uart_transfer_finished, 1, 1);
+
 
 
 void uart_finished_callback(struct device *dev, struct uart_event *evt, void *user_data)
@@ -121,7 +137,6 @@ float time_to_dist(float tof) {
     return (float)tof * SPEED_OF_LIGHT_M_PER_UWB_TU;
 }
 
-#define UART_POLLING 0
 
 struct distance_estimate
 {
@@ -137,8 +152,8 @@ float calculate_propagation_time_alternative(uint64_t tx_init, uint64_t rx_init,
     /* static float drift_offset_int, two_tof_int; */
     static int64_t drift_offset_int, two_tof_int;
 
-    own_duration   = tx_final - tx_init;
-    other_duration = rx_final - rx_init;
+    own_duration   = (tx_final - tx_init) & DWT_TS_MASK;
+    other_duration = (rx_final - rx_init) & DWT_TS_MASK;
 
     // factor determining whether B's clock runs faster or slower measured from the perspective of our clock
     // a positive factor here means that the clock runs faster than ours
@@ -146,8 +161,8 @@ float calculate_propagation_time_alternative(uint64_t tx_init, uint64_t rx_init,
     relative_drift_offset = (float)((int64_t)own_duration-(int64_t)other_duration) / (float)(other_duration);
 
 
-    round_duration_a = rx_resp - tx_init;
-    delay_duration_b = tx_resp - rx_init;
+    round_duration_a = (rx_resp - tx_init) & DWT_TS_MASK;
+    delay_duration_b = (tx_resp - rx_init) & DWT_TS_MASK;
 
     /* drift_offset_int = -relative_drift_offset * (float) delay_duration_b; */
     drift_offset_int = round(-relative_drift_offset * (float) delay_duration_b);
@@ -158,20 +173,26 @@ float calculate_propagation_time_alternative(uint64_t tx_init, uint64_t rx_init,
     return ((float) two_tof_int) * 0.5;
 }
 
+
+static char serial_buf[256];
+static atomic_t tx_state;
+
 // for now this function works on the assumption that all ranging round concluded without any dropped packages
-void calculate_distances_from_timestamps(const struct device *dev,  struct dwt_ranging_frame_buffer *frames, size_t round_length, size_t repetitions)
+void calculate_distances_from_timestamps(struct dwt_ranging_frame_buffer *frames, size_t round_length, size_t repetitions)
 {
     struct distance_estimate distances[round_length];
     struct _ts {
         uint8_t ranging_id;
         uint64_t rx_init, tx_resp, rx_resp, rx_final;
-    } responder_timestamps[round_length];
+    } responder_timestamps[round_length-1];
     uint64_t tx_init, tx_final;
 
     // swipe once through frames to capture all ranging ids and associate them with a position in distances
-    for(size_t i = 0; i < round_length; i++) {
-        const struct dwt_ranging_frame_buffer *buffer = &frames[i];
-        responder_timestamps[i].ranging_id = buffer->ranging_id;
+    for(size_t i = 0, k = 0; i < round_length; i++) {
+        const struct dwt_ranging_frame_buffer *frame = &frames[i];
+        if(frame->ranging_id != node_ranging_id) {
+            responder_timestamps[k++].ranging_id = frame->ranging_id;
+        }
     }
 
     // these we will reference more often
@@ -259,7 +280,7 @@ void calculate_distances_from_timestamps(const struct device *dev,  struct dwt_r
             }
 
             // store in responder_timestamps
-            for(size_t k = 0; k < round_length; k++) {
+            for(size_t k = 0; k < round_length-1; k++) {
                 if(responder_timestamps[k].ranging_id == other_ranging_id) {
                     responder_timestamps[k].rx_init = rx_init;
                     responder_timestamps[k].tx_resp = tx_resp;
@@ -272,95 +293,225 @@ void calculate_distances_from_timestamps(const struct device *dev,  struct dwt_r
     }
 
     LOG_DBG("tx_init: %llx, tx_final: %llx", tx_init, tx_final);
-    // print vector of distances
-    char buf[256];
+
+    k_sem_take(&uart_transfer_finished, K_FOREVER);
+    memset(serial_buf, 0, sizeof(serial_buf));
+
     size_t written = 0;
-    written += snprintf(buf, sizeof(buf), "{\"e\":\"r\",\"i\":%hhu,\"t\":[", node_ranging_id);
+    written += snprintf(serial_buf, sizeof(serial_buf), "{\"e\":\"r\",\"i\":%hhu,\"t\":[", node_ranging_id);
 
-    for(size_t i = 0; i < round_length; i++) {
-        if(responder_timestamps[i].ranging_id != node_ranging_id) {
-            struct _ts *ts = &responder_timestamps[i];
-            /* int32_t tof = compute_prop_time(ts->rx_resp - tx_init, tx_final - ts->rx_resp, ts->rx_final - ts->tx_resp, ts->tx_resp - ts->rx_init); */
-            float tof = calculate_propagation_time_alternative(tx_init, ts->rx_init, ts->tx_resp, ts->rx_resp, tx_final, ts->rx_final);
-            float dist = time_to_dist((float)tof);
+    for(size_t i = 0; i < round_length-1; i++) {
+        struct _ts *ts = &responder_timestamps[i];
+        /* int32_t tof = compute_prop_time(ts->rx_resp - tx_init, tx_final - ts->rx_resp, ts->rx_final - ts->tx_resp, ts->tx_resp - ts->rx_init); */
+        float tof = calculate_propagation_time_alternative(tx_init, ts->rx_init, ts->tx_resp, ts->rx_resp, tx_final, ts->rx_final);
+        float dist = time_to_dist((float)tof);
 
-            // add to return distances
-            distances[i].ranging_id = ts->ranging_id;
-            distances[i].dist = dist;
-            distances[i].quality = 1.0;
+        // add to return distances
+        distances[i].ranging_id = ts->ranging_id;
+        distances[i].dist = dist;
+        distances[i].quality = 1.0;
 
-            LOG_DBG("Ranging id: %hhu, dist: %dcm, rx_init: %llx, tx_resp: %llx, rx_resp: %llx, rx_final: %llx", ts->ranging_id, (int32_t) (dist * 100), ts->rx_init, ts->tx_resp, ts->rx_resp, ts->rx_final);
-            written += snprintf(buf+written, sizeof(buf)-written, "{\"i\":%hhu,\"d\":%d,\"q\":%d}", ts->ranging_id, (int32_t) (dist * 100.0f), 100);
+        LOG_DBG("Ranging id: %hhu, dist: %dcm, rx_init: %llx, tx_resp: %llx, rx_resp: %llx, rx_final: %llx", ts->ranging_id, (int32_t) (dist * 100), ts->rx_init, ts->tx_resp, ts->rx_resp, ts->rx_final);
+        written += snprintf(serial_buf+written, sizeof(serial_buf)-written, "{\"i\":%hhu,\"d\":%d,\"q\":%d}%s", ts->ranging_id, (int32_t) (dist * 10000.0f), 100, i < round_length-2 ? "," : "");
+    }
+
+    written += snprintf(serial_buf+written, sizeof(serial_buf)-written, "]}\r\n");
+
+    /// --- output over UART
+
+    if(written > 255) {
+        LOG_ERR("Not supported on NRF52832");
+        k_sem_give(&uart_transfer_finished);
+    } else {
+        uart_callback_set(uart_dev, uart_finished_callback, NULL);
+
+        int ret = uart_tx(uart_dev, serial_buf, written, SYS_FOREVER_US);
+
+        if (ret) {
+            LOG_ERR("UART TX failed: %d", ret);
+            k_sem_give(&uart_transfer_finished);
+        }
+    }
+}
+
+
+/* RANGING_DATA_CALLBACK_DEFINE(DEVICE_DT_GET(DT_CHOSEN(zephyr_ieee802154)), calculate_distances_from_timestamps); */
+
+static struct timeutil_sync_config sync_conf = {
+    .ref_Hz = CONFIG_SYS_CLOCK_TICKS_PER_SEC,
+    .local_Hz = CONFIG_SYS_CLOCK_TICKS_PER_SEC
+};
+
+static struct timeutil_sync_state rtc_clock_sync_state = {
+    .cfg = &sync_conf
+};
+
+#define SLOT_LENGTH_TIMESTAMP_MS 50
+#define SLOT_RX_GUARD_US         100
+#define SYS_TICK_RX_GUARD_LENGTH ((CONFIG_SYS_CLOCK_TICKS_PER_SEC * SLOT_RX_GUARD_US) / 1000000)
+#define SYS_TICK_ROUND_LENGTH    ((CONFIG_SYS_CLOCK_TICKS_PER_SEC * SLOT_LENGTH_TIMESTAMP_MS) / 1000)
+
+// big TODO i am not happy at all yet with how the schedule next events
+void schedule_network_next_event();
+
+void timesync_check_gpio_handler(struct k_work *work) {
+    SET_GPIO_HIGH(0);
+    SET_GPIO_LOW(0);
+
+    schedule_network_next_event();
+}
+
+void dwt_glossy_handler(struct k_work *work)
+{
+    struct dwt_glossy_tx_result sync_result;
+
+#if CONFIG_RANGING_RADIO_SLEEP
+    radio_api->start(ieee802154_dev);
+#endif
+
+    // wait at at most 10 ms for glossy packet
+    if ( dwt_glossy_tx_timesync(ieee802154_dev, node_ranging_id == CONFIG_GLOSSY_TX_FLOOD_START_NODE_ID, node_ranging_id, 0, &sync_result) >= 0) {
+        if( timeutil_sync_state_update(&rtc_clock_sync_state, &sync_result.clock_sync_instant) ) {
+            uint64_t ref_now;
+            float skew;
+
+            skew = timeutil_sync_estimate_skew(&rtc_clock_sync_state);
+            timeutil_sync_state_set_skew(&rtc_clock_sync_state, skew, NULL);
+
+            LOG_WRN("offset: %d PPB", timeutil_sync_skew_to_ppb(skew));
         }
     }
 
-    snprintf(buf+written, sizeof(buf)-written, "]}");
+#if CONFIG_RANGING_RADIO_SLEEP
+    radio_api->stop(ieee802154_dev);
+#endif
 
-
-    /* if(node_ranging_id != 3) { */
-    /*     return; */
-    /* } else { */
-    /*     // wait like 40 useconds */
-    /*     k_sleep(K_USEC(40)); */
-    /* } */
-
-    LOG_WRN("%s", buf);
-
-    // calculate distances
+    schedule_network_next_event();
 }
 
-/* static char serial_buf[1024]; */
-static atomic_t tx_state;
+#define USE_INITIATION_FRAME 1
+void dwt_mtm_handler(struct k_work *work)
+{
+#if CONFIG_RANGING_RADIO_SLEEP
+    radio_api->start(ieee802154_dev);
+#endif
 
-/* void output_range_measurements(const struct device *dev, const struct dwt_ranging_frame_buffer **frames) { */
-/*     int ret; */
-/*     size_t written = 0; */
+    // wait at most 500 us for start
+    struct dwt_ranging_frame_buffer *frames;
+    if ( !dwt_mtm_ranging(ieee802154_dev, NUM_NODES, node_ranging_id, node_ranging_id, USE_INITIATION_FRAME, 500, &frames) ) {
+        calculate_distances_from_timestamps(frames, NUM_NODES, 3);
+    }
 
-/*     k_sem_take(&uart_transfer_finished, K_FOREVER); */
-/*     memset(serial_buf, 0, sizeof(serial_buf)); */
+#if CONFIG_RANGING_RADIO_SLEEP
+    radio_api->stop(ieee802154_dev);
+#endif
 
-/* #if !UART_POLLING */
-/*     uart_callback_set(uart_dev, uart_finished_callback, NULL); */
-/* #endif */
+    schedule_network_next_event();
+}
 
-/*     // HEADER */
-/*     written += snprintf(serial_buf, sizeof(serial_buf), "{\"e\":\"r\",\"i\":%hhu,\"t\":[", node_ranging_id); */
 
-/*     // TIMESTAMPS */
-/*     for (uint8_t i = 0; i < data->len; i++) { */
-/*         written += snprintf(serial_buf + written, sizeof(serial_buf) - written, "(%u,%llx)%s", data->timestamps[i].ranging_id, data->timestamps[i].dwt_ts, i == data->len - 1 ? "" : ","); */
-/*     } */
+#define MTM_ALOHA_SLOTS 2
+void dwt_mtm_aloha_handler(struct k_work *work)
+{
+#if CONFIG_RANGING_RADIO_SLEEP
+    radio_api->start(ieee802154_dev);
+#endif
 
-/*     written += snprintf(serial_buf + written, sizeof(serial_buf) - written, "]}\r\n"); */
+    // map nodes onto 2 slots
+    uint8_t slot_offset = (rand() % 5);
+    /* uint8_t join_round = rand() % 2; */
+    uint8_t join_round = 1;
 
-/*     if(written > 255) { */
-/*         LOG_ERR("Not supported on NRF52832"); */
-/*         goto err; */
-/*     } */
+    if(join_round) {
+        // for now put every node on slot 1
+        struct dwt_ranging_frame_buffer *frames;
+        if ( !dwt_mtm_ranging(ieee802154_dev, MTM_ALOHA_SLOTS, slot_offset, node_ranging_id, USE_INITIATION_FRAME, 500, &frames) ) {
+            calculate_distances_from_timestamps(frames, MTM_ALOHA_SLOTS, 3);
+        }
+    }
 
-/* #if UART_POLLING */
-/*     for (size_t i = 0; i < written; i++) { */
-/*         uart_poll_out(uart_dev, serial_buf[i]); */
-/*     } */
-/*     k_sem_give(&uart_transfer_finished); */
-/* #else */
-/*     ret = uart_tx(uart_dev, serial_buf, written, SYS_FOREVER_US); */
+#if CONFIG_RANGING_RADIO_SLEEP
+    radio_api->stop(ieee802154_dev);
+#endif
 
-/*     if (ret) { */
-/*         LOG_ERR("UART TX failed: %d", ret); */
-/*         goto err; */
-/*     } */
-/* #endif */
+    schedule_network_next_event();
+}
 
-/*     return; */
 
-/*   err: */
-/*     k_sem_give(&uart_transfer_finished); */
-/* } */
+K_WORK_DEFINE(dwt_glossy_work_item, dwt_glossy_handler);
+K_WORK_DEFINE(dwt_mtm_work_item, dwt_mtm_handler);
+K_WORK_DEFINE(dwt_mtm_aloha_work_item, dwt_mtm_aloha_handler);
+K_WORK_DEFINE(gpio_work_item, timesync_check_gpio_handler);
 
-/* RANGING_DATA_CALLBACK_DEFINE(DEVICE_DT_GET(DT_CHOSEN(zephyr_ieee802154)), output_range_measurements); */
-RANGING_DATA_CALLBACK_DEFINE(DEVICE_DT_GET(DT_CHOSEN(zephyr_ieee802154)), calculate_distances_from_timestamps);
+void network_event_handler() {
+    if(next_event == RANGING_GLOSSY_SLOT) {
+        k_work_submit(&dwt_glossy_work_item);
+    } else if(next_event == RANGING_MTM_SLOT) {
+        k_work_submit(&dwt_mtm_work_item);
+    }
 
+    switch(next_event) {
+    case RANGING_GLOSSY_SLOT:
+        k_work_submit(&dwt_glossy_work_item);
+        break;
+    case RANGING_MTM_SLOT:
+        k_work_submit(&dwt_mtm_work_item);
+        break;
+    case RANGING_MTM_ALOHA_SLOT:
+        k_work_submit(&dwt_mtm_aloha_work_item);
+        break;
+    case RANGING_CHECK_TIMESYNC_GPIO:
+        k_work_submit(&gpio_work_item);
+        break;
+    default:
+        break;
+    }
+}
+
+K_TIMER_DEFINE(event_timer, network_event_handler, NULL);
+
+void schedule_network_next_event() {
+    uint64_t ref_now, ref_slot_start_ts, local_slot_start_ts;
+    k_timeout_t next_event_delay;
+
+    if( node_ranging_id == CONFIG_GLOSSY_TX_FLOOD_START_NODE_ID ) {
+        ref_now = k_uptime_ticks();
+    } else if(timeutil_sync_ref_from_local(&rtc_clock_sync_state, k_uptime_ticks(), &ref_now) < 0) {
+        ref_now = 0;
+    }
+
+    if( ref_now > 0 ) {
+        ref_slot_start_ts = ref_now + ( SYS_TICK_ROUND_LENGTH - ref_now % SYS_TICK_ROUND_LENGTH );
+
+        if(node_ranging_id != CONFIG_GLOSSY_TX_FLOOD_START_NODE_ID) {
+            timeutil_sync_local_from_ref(&rtc_clock_sync_state, ref_slot_start_ts, &local_slot_start_ts);
+            next_event_delay = K_TIMEOUT_ABS_TICKS(local_slot_start_ts);
+        } else {
+            next_event_delay = K_TIMEOUT_ABS_TICKS(ref_slot_start_ts);
+        }
+
+        if(ref_slot_start_ts % (SYS_TICK_ROUND_LENGTH * 20) == 0) {
+            next_event = RANGING_GLOSSY_SLOT;
+        } else if(ref_slot_start_ts % (SYS_TICK_ROUND_LENGTH * 10) == 0) {
+            next_event = RANGING_CHECK_TIMESYNC_GPIO;
+        /* } else (ref_slot_start_ts % (SYS_TICK_ROUND_LENGTH * 10) == 0) { */
+        } else {
+            /* next_event = RANGING_MTM_ALOHA_SLOT; */
+            next_event = RANGING_MTM_SLOT;
+        }
+    } else { // if we are not able yet to transform between timescales we will glossy until we can
+        LOG_WRN("Not synced yet, glossy until we are");
+        next_event = RANGING_GLOSSY_SLOT;
+        next_event_delay = K_NO_WAIT;
+    }
+
+    k_timer_start(&event_timer, next_event_delay, K_NO_WAIT);
+}
+
+/* https://docs.zephyrproject.org/apidoc/latest/group__timeutil__sync__apis.html */
+/* https://docs.zephyrproject.org/latest/services/pm/system.html */
+/* https://infocenter.nordicsemi.com/index.jsp?topic=%2Fps_nrf5340%2Fchapters%2Fcurrent_consumption%2Fdoc%2Fcurrent_consumption.html&cp=4_0_0_3_3_0_0&anchor=unique_1675781758 */
+// see above Current at ON_IDLE7 which should be about 1.5 uAmps.
 int main(void) {
     int ret = 0;
     LOG_INF("Starting ...");
@@ -404,22 +555,11 @@ int main(void) {
 
     k_sleep(K_MSEC(INITIAL_DELAY_MS));
 
-    LOG_DBG("Starting main loop");
+    LOG_DBG("Starting round timer");
+    schedule_network_next_event();
 
-    uint32_t cur_round = 0;
-
-    while(cur_round < NUM_ROUNDS) {
-        LOG_DBG("Starting round %u", cur_round);
-        // measure through cpu cycles how long the whole dwt_mtm_ranging cycle takes
-        /* uint32_t start = k_cycle_get_32(); */
-        dwt_mtm_ranging(ieee802154_dev, NUM_NODES, node_ranging_id, node_ranging_id);
-        /* uint32_t end =  k_cycle_get_32(); */
-
-        /* LOG_WRN("Time in milliseconds: %u", (uint32_t)k_cyc_to_us_floor64(end - start) / 1000); */
-
-        k_sleep(K_MSEC(50));
-
-        cur_round++;
+    while (1) {
+        k_msleep(5000);
     }
 }
 

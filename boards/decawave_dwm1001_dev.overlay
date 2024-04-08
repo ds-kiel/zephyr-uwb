@@ -10,8 +10,14 @@
         };
     };
 
+
     aliases {
         deb0       = &led0;
         deb1       = &led1;
     };
+};
+
+&systick {
+ 	/* Use RTC for system clock, instead of SysTick. */
+ 	status = "okay";
 };

@@ -2,6 +2,10 @@ config NUM_NODES
     int "Number of nodes"
     default 2
 
+config GLOSSY_TX_FLOOD_START_NODE_ID
+    int "Glossy TX flood start node ID"
+    default 8
+
 choice TESTBED
     bool "Testbed"
     default TESTBED_KIEL
