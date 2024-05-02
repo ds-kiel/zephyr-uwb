@@ -59,13 +59,13 @@ def parse_messages_from_lines(line_it, src_dev=None):
                 if orig_msg["event"] == "rx":
                     msg = {
                         'event': orig_msg['event'],
-                        #'own_number': orig_msg['own_id'],
-                        'own_number': orig_msg['other_id'],
-                        #'rx_number': orig_msg['other_id'],
-                        'rx_number': orig_msg['own_id'],
+                        'own_number': orig_msg['own_id'],
+                        #'own_number': orig_msg['other_id'],
+                        'rx_number': orig_msg['other_id'],
+                        #'rx_number': orig_msg['own_id'],
                         'rx_round': orig_msg['rtc_round_ts'],
                         #'rx_phase': orig_msg['phase'],
-                        'rx_slot': orig_msg['slot'] + (int(orig_msg['phase'])-1) * SLOTS_PER_PHASE, # TODO: this is a bit hacky, no?!
+                        'rx_slot': orig_msg['slot'] + int(orig_msg['phase']) * SLOTS_PER_PHASE, # TODO: this is a bit hacky, no?!
                         'rx_ts': orig_msg['ts'],
                         'bias_corrected_rx_ts': orig_msg.get('ts_bias_corrected', orig_msg['ts'])
                     }
@@ -75,8 +75,8 @@ def parse_messages_from_lines(line_it, src_dev=None):
                         'own_number': orig_msg['own_id'],
                         'tx_round': orig_msg['rtc_round_ts'],
                         # 'rx_phase': orig_msg['phase'],
-                        'tx_slot': orig_msg['slot'] + (int(orig_msg['phase']) - 1) * SLOTS_PER_PHASE,
                         # TODO: this is a bit hacky, no?!
+                        'tx_slot': orig_msg['slot'] + int(orig_msg['phase'])* SLOTS_PER_PHASE,
                         'tx_ts': orig_msg['ts']
                     }
                 else:
