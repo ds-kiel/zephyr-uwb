@@ -13,6 +13,9 @@ choice TESTBED
 config TESTBED_KIEL
     bool "TESTBED_KIEL"
 
+config TESTBED_TOULOUSE
+    bool "TESTBED_TOULOUSE"
+
 config TESTBED_DRONE
     bool "TESTBED_DRONE"
 

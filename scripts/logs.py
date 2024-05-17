@@ -164,7 +164,6 @@ def calc_ci_of_sd(sd, num, alpha=0.01):
     return (low, up)
 
 
-
 def extract_data_slots(rx_df, tx_df, r, a, b, tdoa_src_dev_number, init_slot, response_slot, final_slot):
     # we extract data for initiator a and responder b (numbers not device names!)
     def first_or_none(l):
@@ -178,25 +177,26 @@ def extract_data_slots(rx_df, tx_df, r, a, b, tdoa_src_dev_number, init_slot, re
             orient='records'))
 
     init_rx_passive = first_or_none(rx_df[(rx_df["rx_round"] == r) & (rx_df["rx_slot"] == init_slot) & (
-                rx_df["own_number"] == tdoa_src_dev_number)].to_dict(orient='records'))
+                rx_df["own_number"] == tdoa_src_dev_number) & (rx_df["rx_number"] == a)].to_dict(orient='records'))
 
     response_tx = first_or_none(
         tx_df[(tx_df["tx_round"] == r) & (tx_df["tx_slot"] == response_slot) & (tx_df["own_number"] == b)].to_dict(
             orient='records'))
     response_rx = first_or_none(
-        rx_df[(rx_df["rx_round"] == r) & (rx_df["rx_slot"] == response_slot) & (rx_df["own_number"] == a)].to_dict(
+        rx_df[(rx_df["rx_round"] == r) & (rx_df["rx_slot"] == response_slot) & (rx_df["own_number"] == a) & (rx_df["rx_number"] == b)].to_dict(
             orient='records'))
     response_rx_passive = first_or_none(rx_df[(rx_df["rx_round"] == r) & (rx_df["rx_slot"] == response_slot) & (
-                rx_df["own_number"] == tdoa_src_dev_number)].to_dict(orient='records'))
+                rx_df["own_number"] == tdoa_src_dev_number) & (rx_df["rx_number"] == b)].to_dict(orient='records'))
 
     final_tx = first_or_none(
         tx_df[(tx_df["tx_round"] == r) & (tx_df["tx_slot"] == final_slot) & (tx_df["own_number"] == a)].to_dict(
             orient='records'))
     final_rx = first_or_none(
-        rx_df[(rx_df["rx_round"] == r) & (rx_df["rx_slot"] == final_slot) & (rx_df["own_number"] == b)].to_dict(
+        rx_df[(rx_df["rx_round"] == r) & (rx_df["rx_slot"] == final_slot) & (rx_df["own_number"] == b) & (rx_df["rx_number"] == a)].to_dict(
             orient='records'))
     final_rx_passive = first_or_none(rx_df[(rx_df["rx_round"] == r) & (rx_df["rx_slot"] == final_slot) & (
-                rx_df["own_number"] == tdoa_src_dev_number)].to_dict(orient='records'))
+                rx_df["own_number"] == tdoa_src_dev_number) & (rx_df["rx_number"] == a)].to_dict(orient='records'))
+
 
     assert init_rx is None or init_rx['rx_number'] == a
     assert init_rx_passive is None or init_rx_passive['rx_number'] == a
@@ -206,6 +206,7 @@ def extract_data_slots(rx_df, tx_df, r, a, b, tdoa_src_dev_number, init_slot, re
 
     assert final_rx is None or final_rx['rx_number'] == a
     assert final_rx_passive is None or final_rx_passive['rx_number'] == a
+
 
     ret = {
         'init_tx': init_tx,
@@ -222,7 +223,6 @@ def extract_data_slots(rx_df, tx_df, r, a, b, tdoa_src_dev_number, init_slot, re
     return ret
 
 def extract_record(testbed, rx_df, tx_df, r, a, b, tdoa_src_dev_number, init_slot, response_slot, final_slot, bias_corrected=True):
-
     data = extract_data_slots(rx_df, tx_df, r, a, b, tdoa_src_dev_number, init_slot, response_slot, final_slot)
 
     da = testbed.devs[a]
@@ -357,7 +357,7 @@ def extract_record(testbed, rx_df, tx_df, r, a, b, tdoa_src_dev_number, init_slo
 
 def gen_tdma_twr_records(testbed, run, tdoa_src_dev_number=None, bias_corrected=True, slots_per_phase=None):
     if slots_per_phase is None:
-        slots_per_phase = len(testbed.devs)
+        slots_per_phase = testbed.SLOTS_PER_PHASE
 
     for (r, rx_events, tx_events) in gen_round_events(testbed, run):
         rx_df = pd.DataFrame.from_records(rx_events)
@@ -393,9 +393,8 @@ def gen_tdma_twr_records(testbed, run, tdoa_src_dev_number=None, bias_corrected=
                 else:
                     response_slot = b_ev['tx_slot'] + slots_per_phase # else we use the response in the next phase
 
-
                 rec = extract_record(testbed, rx_df, tx_df, r, a, b, tdoa_src_dev_number, init_slot, response_slot, final_slot, bias_corrected=bias_corrected)
-                #print(rec)
+                # print(rec)
                 yield rec
 
 
@@ -410,6 +409,9 @@ if __name__ == '__main__':
     if testbed_name == 'ds_kiel':
         from testbed import ds_kiel
         testbed = ds_kiel
+    elif testbed_name == 'toulouse':
+        from testbed import toulouse
+        testbed = toulouse
     else:
         exit()
 

@@ -23,22 +23,27 @@ uint16_t node_ids[NUM_NODES] = {
 	0x47e0, // dwm1001-13
 	0x0e92, // dwm1001-14
 };
+
+uint16_t neighbor_graph_degree[NUM_NODES] = {14};
+uint16_t aloha_access_prob[NUM_NODES] = {1000};
+
 int16_t node_factory_antenna_delay_offsets[NUM_NODES] = {
-	8, // dwm1001-1
-	9, // dwm1001-2
-	7, // dwm1001-3
-	22, // dwm1001-4
-	11, // dwm1001-5
-	12, // dwm1001-6
-	7, // dwm1001-7
-	22, // dwm1001-8
-	22, // dwm1001-9
-	22, // dwm1001-10
+	8,   // dwm1001-1
+	9,   // dwm1001-2
+	7,   // dwm1001-3
+	22,  // dwm1001-4
+	11,  // dwm1001-5
+	12,  // dwm1001-6
+	7,   // dwm1001-7
+	22,  // dwm1001-8
+	22,  // dwm1001-9
+	22,  // dwm1001-10
 	-14, // dwm1001-11
-	-9, // dwm1001-12
-	9, // dwm1001-13
+	-9,  // dwm1001-12
+	9,   // dwm1001-13
 	-13, // dwm1001-14
 };
+
 float32_t node_distances[NUM_PAIRS] = {
 	 1.8515, // dwm1001-2 to dwm1001-1
 	 3.8663, // dwm1001-3 to dwm1001-1

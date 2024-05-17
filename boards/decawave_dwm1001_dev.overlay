@@ -17,6 +17,21 @@
     };
 };
 
+&uart0 {
+	status = "okay";
+	compatible = "nordic,nrf-uarte";
+	//current-speed = <1000000>;
+	//current-speed = <230400>;
+
+        // the baud rates above do not seem to be running stable when using the onboard jlink of the dwm1001
+	current-speed = <115200>;
+	//current-speed = <57600>;
+	pinctrl-0 = <&uart0_default>;
+	pinctrl-1 = <&uart0_sleep>;
+	pinctrl-names = "default", "sleep";
+};
+
+
 &systick {
  	/* Use RTC for system clock, instead of SysTick. */
  	status = "okay";

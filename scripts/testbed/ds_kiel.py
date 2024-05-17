@@ -67,6 +67,7 @@ def parse_messages_from_lines(line_it, src_dev=None):
                         #'rx_phase': orig_msg['phase'],
                         'rx_slot': orig_msg['slot'] + int(orig_msg['phase']) * SLOTS_PER_PHASE, # TODO: this is a bit hacky, no?!
                         'rx_ts': orig_msg['ts'],
+                        'fp_index' : orig_msg['fp_index'],
                         'bias_corrected_rx_ts': orig_msg.get('ts_bias_corrected', orig_msg['ts'])
                     }
                 elif orig_msg["event"] == "tx":

@@ -1,6 +1,6 @@
 
 #include <zephyr/drivers/uart.h>
-#include <zephyr/zephyr.h>
+#include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 #include "log.h"
 #include "nodes.h"

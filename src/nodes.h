@@ -14,7 +14,12 @@
 
 extern int16_t node_factory_antenna_delay_offsets[NUM_NODES];
 extern uint16_t node_ids[NUM_NODES];
+extern uint16_t neighbor_graph_degree[NUM_NODES];
 extern float32_t node_distances[NUM_PAIRS];
+extern uint16_t aloha_access_prob[NUM_NODES];
+
+#define ALOHA_ACCESS_PROB_MULTIPLIER 1000
+
 
 size_t pair_index(uint16_t a, uint16_t b);
 uint16_t get_own_node_id();
