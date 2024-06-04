@@ -7,6 +7,9 @@
 #include <zephyr/drivers/ieee802154/dw1000.h>
 #include <zephyr/random/random.h>
 #include <zephyr/sys/hash_function.h>
+
+#include <zephyr/sys/base64.h>
+
 #include <stdio.h>
 
 #include <zephyr/sys/timeutil.h>
@@ -120,8 +123,8 @@ static uint32_t timesync_skew_update_count = 0;
 #define FP_INDEX_VALIDY_RANGE 20
 #define EXTRACT_WITH_REJECT           0 // TODO we do this in the ranging directly now
 
-/* #define SLOT_LENGTH_TIMESTAMP_MS 30 */
-#define SLOT_LENGTH_TIMESTAMP_MS 200 // for debugging do 500ms slots
+/* #define SLOT_LENGTH_TIMESTAMP_MS 30 */ // Production
+#define SLOT_LENGTH_TIMESTAMP_MS 6000 // Debugging/Data Collection (CIR etc.)
 #define SYS_TICK_ROUND_LENGTH    ((CONFIG_SYS_CLOCK_TICKS_PER_SEC * SLOT_LENGTH_TIMESTAMP_MS) / 1000)
 
 #define WITHOUT_INITIATION_FRAME 0
@@ -132,8 +135,8 @@ static uint32_t timesync_skew_update_count = 0;
 #define PREAMBLE_SYMBOLS 128  //TODO  + 120 // guard times
 #define MAX_PAC_TIMEOUT  (PREAMBLE_SYMBOLS / PAC_SIZE)
 
-#define MTM_HASHED_SLOTS 15
-#define MTM_ALOHA_SLOTS  15
+#define MTM_HASHED_SLOTS MIN(NUM_NODES, MAX_ROUND_LENGTH)
+#define MTM_ALOHA_SLOTS  5
 
 K_SEM_DEFINE(uart_transfer_finished, 1, 1);
 
@@ -173,7 +176,6 @@ compute_prop_time(int32_t initiator_roundtrip, int32_t initiator_reply,
 float time_to_dist(float tof) {
     return (float)tof * SPEED_OF_LIGHT_M_PER_UWB_TU;
 }
-
 
 
 /* TODO this is not that nice yet, maybe we should just switch over to functions which calculate the delay duration, round duration etc.
@@ -500,6 +502,132 @@ int calculate_frequency_offsets(const struct twr_template *twr_templates, int te
     return offset_cnt;
 }
 
+/* amount of bytes to write in each batch, encoding using base64 will encode the chunk into a larger
+   amount of symbols than bytes which have to be written.  Has to be chosen small enough such that
+   each base64 encoded string fits into serial_buf.
+ */
+
+
+// make sure this is a multiple of 4
+#define CIR_CHUNK_WRITE_SIZE (4*13)
+#define CIR_SERIAL_BUF_ENCODED_OFFSET 500
+
+int output_cir_uart(int slot, int repetition, const uint8_t *cir_memory, size_t size)
+{
+
+    // for debug purposes we will measure the timing this takes, which should be quite hefty
+    unsigned int start_ts = k_cycle_get_32(), end_ts;
+
+    int cir_bytes_written = 0;
+    int ret, length;
+    uart_callback_set(uart_dev, uart_finished_callback, NULL);
+
+    k_sem_take(&uart_transfer_finished, K_FOREVER);
+    length = snprintf(serial_buf, sizeof(serial_buf),
+				       "{\"event\": \"cir\", \"rtc\": %llu, \"slot\": %d, "
+				       "\"phase\": %d, \"length\": %d, \"data\":\"",
+				       next_event_time, slot, repetition, size);
+
+    if (length > 255) {
+	LOG_WRN("Buffer overflow");
+        return -1;
+    }
+
+    ret = uart_tx(uart_dev, serial_buf, length, SYS_FOREVER_US);
+
+    if (ret) {
+        LOG_WRN("UART TX failed: %d", ret);
+	k_sem_give(&uart_transfer_finished);
+
+        return -1;
+    }
+
+    // Base64 encode the data
+    do {
+        k_sem_take(&uart_transfer_finished, K_FOREVER); // always wait for previous uart transfer to finish
+
+	ret = base64_encode(serial_buf, sizeof(serial_buf), &length,
+				 cir_memory + cir_bytes_written,
+				 MIN(CIR_CHUNK_WRITE_SIZE, size - cir_bytes_written));
+
+	if (ret >= 0) {
+	    ret = uart_tx(uart_dev, serial_buf, length, SYS_FOREVER_US);
+
+            if (ret) {
+                LOG_ERR("UART TX failed: %d", ret);
+                k_sem_give(&uart_transfer_finished);
+	    }
+
+            cir_bytes_written += CIR_CHUNK_WRITE_SIZE;
+	} else {
+	    LOG_ERR("Base64 encoding failed");
+            k_sem_give(&uart_transfer_finished);
+            return -1;
+        }
+    } while ((int)size - cir_bytes_written > 0);
+
+    // wait for encoded part to finish
+    k_sem_take(&uart_transfer_finished, K_FOREVER);
+
+    length = snprintf(serial_buf, sizeof(serial_buf), "\"}\n");
+    ret = uart_tx(uart_dev, serial_buf, length, SYS_FOREVER_US);
+
+    if (ret) {
+        LOG_ERR("UART TX failed: %d", ret);
+        k_sem_give(&uart_transfer_finished);
+    }
+
+    end_ts = k_cycle_get_32();
+
+    // sys_clock_hw_cycles_per_sec()
+    LOG_WRN("CIR output took %d ms", ( (end_ts - start_ts) * 1000 ) / sys_clock_hw_cycles_per_sec());
+
+    return 0;
+}
+
+int output_cir_rtt(int slot, int repetition, const uint8_t *cir_memory, size_t size)
+{
+
+    // for debug purposes we will measure the timing this takes, which should be quite hefty
+    unsigned int start_ts = k_cycle_get_32(), end_ts;
+
+    int cir_bytes_written = 0;
+    int ret, length;
+
+    length = snprintf(serial_buf, sizeof(serial_buf),
+        "{\"event\": \"cir\", \"i\": %u, \"rtc\": %llu, \"slot\": %d, "
+        "\"phase\": %d, \"length\": %d, \"data\":\"",
+        node_ranging_id, next_event_time, slot, repetition, size);
+
+    printk("%s", serial_buf);
+    do {
+        ret = base64_encode(serial_buf, sizeof(serial_buf), &length, cir_memory + cir_bytes_written,
+			    MIN(CIR_CHUNK_WRITE_SIZE, size - cir_bytes_written));
+        /* length = 0; */
+
+	/* for (int i = 0; i < CIR_CHUNK_WRITE_SIZE; i++) { */
+        /*     length += snprintf(serial_buf + length, sizeof(serial_buf) - length, "%02x", cir_memory[cir_bytes_written + i]); */
+	/* } */
+
+	if (ret >= 0) {
+            serial_buf[length] = '\0';
+	    printk("%s,", serial_buf);
+            cir_bytes_written += CIR_CHUNK_WRITE_SIZE;
+        }
+    } while ( ( (int)size - cir_bytes_written ) > 0);
+
+    length = snprintf(serial_buf, sizeof(serial_buf), "\"}\n");
+
+    printk("%s", serial_buf);
+
+    end_ts = k_cycle_get_32();
+
+    // sys_clock_hw_cycles_per_sec()
+    LOG_WRN("CIR output took %d ms", ( (end_ts - start_ts) * 1000 ) / sys_clock_hw_cycles_per_sec());
+
+    return 0;
+}
+
 
 /* Although this function gets passed the whole twr_template it will only access
  * the timestamps of the first exchange between initiator and responder.  This
@@ -520,7 +648,8 @@ enum measurement_calculation_mode {
   CALCULATE_CFOTWR,
 };
 
-int calculate_measurements(const struct twr_template *twr_templates,
+int calculate_measurements(
+    const struct twr_template *twr_templates,
     int template_count,
     const struct freq_offset *offsets,
     int frequency_count,
@@ -874,7 +1003,6 @@ void dwt_mtm_handler(struct k_work *work)
 	    .timeout_us = 500,
     };
 
-
     SET_GPIO_HIGH(0);
     if (!dwt_mtm_ranging(ieee802154_dev, node_ranging_id, &conf, &frame_infos)) {
         SET_GPIO_LOW(0);
@@ -955,6 +1083,11 @@ void dwt_mtm_aloha_handler(struct k_work *work)
         .repetitions = 3,
         .tx_slot_offset = slot_offset,
         .use_initiation_frame = 0,
+#if CONFIG_DWT_MTM_OUTPUT_CIR
+		.extract_cir = 1,
+		/* .cir_handler = output_cir_uart, */
+		.cir_handler = output_cir_rtt,
+#endif
         .cca = 0,
         .reject_frames = 0,
         .valid_fp_index_range = 20,
@@ -962,8 +1095,8 @@ void dwt_mtm_aloha_handler(struct k_work *work)
     };
 
     if ( !dwt_mtm_ranging(ieee802154_dev, node_ranging_id, &conf, &frame_infos) ) {
-        calculate_distances_from_frames(frame_infos, EXTRACT_ALL, MTM_ALOHA_SLOTS, 3, next_event_time);
-        /* output_frame_timestamps(frame_infos, MTM_ALOHA_SLOTS, 3, next_event_time); */
+        /* calculate_distances_from_frames(frame_infos, EXTRACT_ALL, MTM_ALOHA_SLOTS, 3, next_event_time); */
+        output_frame_timestamps(frame_infos, MTM_ALOHA_SLOTS, 3, next_event_time);
     }
 
 #if CONFIG_RANGING_RADIO_SLEEP
@@ -1016,20 +1149,25 @@ void dwt_mtm_hashed_handler(struct k_work *work)
 
         struct dwt_ranging_frame_info *frame_infos;
 
-        struct mtm_ranging_config conf = {
-                .round_length = MTM_HASHED_SLOTS,
-                .repetitions = 3,
-                .tx_slot_offset = tx_slot,
-                .use_initiation_frame = 0,
-                .cca = 0,
+	struct mtm_ranging_config conf = {
+		.round_length = MTM_HASHED_SLOTS,
+		.repetitions = 3,
+		.tx_slot_offset = tx_slot,
+		.use_initiation_frame = 0,
+		.cca = 0,
+#if CONFIG_DWT_MTM_OUTPUT_CIR
+		.extract_cir = 1,
+		/* .cir_handler = output_cir_uart, */
+		.cir_handler = output_cir_rtt,
+#endif
                 .reject_frames = 0,
                 .valid_fp_index_range = 20,
                 .timeout_us = 500,
         };
 
         if ( (ret = !dwt_mtm_ranging(ieee802154_dev, node_ranging_id, &conf, &frame_infos)) ) {
-                calculate_distances_from_frames(frame_infos, EXTRACT_ALL, MTM_HASHED_SLOTS, 3, next_event_time);
-                /* output_frame_timestamps(frame_infos, MTM_HASHED_SLOTS, 3, next_event_time); */
+                /* calculate_distances_from_frames(frame_infos, EXTRACT_ALL, MTM_HASHED_SLOTS, 3, next_event_time); */
+                output_frame_timestamps(frame_infos, MTM_HASHED_SLOTS, 3, next_event_time);
         }
 
         if(ret < 0) {
@@ -1204,7 +1342,7 @@ void schedule_network_next_event() {
             next_event_delay = K_TIMEOUT_ABS_TICKS(ref_slot_start_ts);
         }
 
-        if(ref_slot_start_ts % (SYS_TICK_ROUND_LENGTH * 5) == 0) {
+        if(ref_slot_start_ts % (SYS_TICK_ROUND_LENGTH * 4) == 0) {
             next_event = RANGING_GLOSSY_SLOT;
         /* } else if(ref_slot_start_ts % (SYS_TICK_ROUND_LENGTH * 5) == 0) { */
             /* next_event = RANGING_CHECK_TIMESYNC_GPIO; */
