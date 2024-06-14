@@ -6,6 +6,15 @@ config GLOSSY_TX_FLOOD_START_NODE_ID
     int "Glossy TX flood start node ID"
     default 8
 
+config DWT_MTM_OUTPUT_CIR
+    bool "output channel impulse response"
+    default n
+
+config DWT_MTM_CALCULATE_DISTANCES
+    bool "if n just output raw timestamps"
+    default y
+
+
 choice TESTBED
     bool "Testbed"
     default TESTBED_KIEL

@@ -2,3 +2,6 @@
 .DS_Store
 /build
 *.pyc
+.direnv/
+.cache/
+venv/
