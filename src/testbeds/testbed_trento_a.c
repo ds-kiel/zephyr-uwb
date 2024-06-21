@@ -1,4 +1,4 @@
-#include "nodes.h"
+#include "../nodes.h"
 // ----------------------
 // Definition of Testbed trento_a
 #if CONFIG_TESTBED_TRENTO_A

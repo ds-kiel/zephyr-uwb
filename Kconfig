@@ -10,10 +10,21 @@ config DWT_MTM_OUTPUT_CIR
     bool "output channel impulse response"
     default n
 
-config DWT_MTM_CALCULATE_DISTANCES
+config DWT_MTM_ON_DEVICE_PROCESSING
     bool "if n just output raw timestamps"
     default y
 
+choice RANGING_OUTPUT_TARGET
+    bool "output target interface"
+    default RANGING_OUTPUT_RTT
+
+config RANGING_OUTPUT_RTT
+    bool "RANGING_OUTPUT_RTT"
+
+config RANGING_OUTPUT_UART
+    bool "RANGING_OUTPUT_UART"
+
+endchoice
 
 choice TESTBED
     bool "Testbed"

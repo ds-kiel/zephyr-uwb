@@ -1,4 +1,4 @@
-#include "nodes.h"
+#include "../nodes.h"
 // ----------------------
 // Definition of Testbed lille
 

@@ -1,4 +1,4 @@
-# Zephyr UWB 
+# Zephyr UWB
 
 
 ## Setup
