@@ -65,12 +65,13 @@ params = [
 
 
 
-def calculate_optimal_access_prob(threshold, params):
+def calculate_optimal_access_prob(threshold, params, plot=True):
     ps = np.linspace(0, 1, 100)
 
     for N, S in params:
         probs = [calc_collision_prob(N, S, p) for p in ps]
-        plt.plot(ps, probs, label="n={}, s={}".format(N, S))
+        if plot:
+            plt.plot(ps, probs, label="n={}, s={}".format(N, S))
         best_i = max([i for (i,x) in enumerate(probs) if x <= threshold])
         #print("n={}, s={}, p={}".format(N, S, ps[best_i]))
         #print("{},".format(round(ps[best_i]*1000)))
