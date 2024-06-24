@@ -291,7 +291,7 @@ def export_by_nodes(export_dir):
 
     plt.clf()
 
-    for density in [0.2]:
+    for density in [0.1]:
         color_aggs = []
         hash_aggs = []
         slotted_aloha_aggs = []
@@ -307,7 +307,8 @@ def export_by_nodes(export_dir):
             for num_nodes in xs:
                 for gc in range(num_graphs_per_count):
 
-                    g = nx.gnp_random_graph(num_nodes, density)
+                    #g = nx.gnp_random_graph(num_nodes, density)
+                    g = nx.random_regular_graph(4, num_nodes)
 
                     color_sched = create_coloring_schedule(g, num_slots)
                     hash_sched = create_hashed_schedule(g, num_slots)
