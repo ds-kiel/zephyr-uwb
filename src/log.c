@@ -199,7 +199,7 @@ void output_measurements_rtt(const struct measurement *g_measurements,
 #endif
 
 void output_frame_timestamps(const struct dwt_ranging_frame_info *frame_infos,
-    const struct mtm_ranging_config *conf, uint64_t rtc_slot_ts)
+    const struct mtm_ranging_config *conf, uint64_t rtc_slot_ts, const char *additional)
 {
     for (int i = 0; i < conf->phases-1; i++) { // the last phase/phase is not of importance for us
         for(int j = 0; j < conf->slots_per_phase; j++) {
@@ -210,19 +210,26 @@ void output_frame_timestamps(const struct dwt_ranging_frame_info *frame_infos,
 
 		if (curr_frame_info->type == DWT_RANGING_TRANSMITTED_FRAME) {
 		    printk("{\"event\": \"tx\", \"own_id\": %u, \"rtc_round_ts\": %llu, \"phase\": "
-			   "%u, \"slot\": %u, \"ts\": %llu}\n",
+			   "%u, \"slot\": %u, \"ts\": %llu",
                         conf->ranging_id, rtc_slot_ts, i, j, curr_frame_info->timestamp);
 		} else {
 		    printk("{\"event\": \"rx\", \"own_id\": %u, \"other_id\": %u,"
 			   "\"rtc_round_ts\": %llu, \"phase\": %u, \"slot\": %u,"
 			   "\"fp_ampl1\": %u, \"fp_ampl2\": %u, \"fp_ampl3\": %u,"
-			   "\"fp_index\": %u, \"cir_pwr\": %u,"
-			   "\"ts\": %llu }\n",
+			   "\"fp_index\": %u, \"cir_pwr\": %u, \"cfo\": %d, \"rx_pacc\": %u,"
+			   "\"ts\": %llu",
 			   conf->ranging_id, curr_frame->ranging_id, rtc_slot_ts, i, j,
 			   curr_frame_info->fp_ampl1, curr_frame_info->fp_ampl2,
 			   curr_frame_info->fp_ampl3, curr_frame_info->fp_index >> 6,
-			   curr_frame_info->cir_pwr, curr_frame_info->timestamp);
+			   curr_frame_info->cir_pwr, (int)(curr_frame_info->cfo_ppm * 1e6),
+                        curr_frame_info->rx_pacc, curr_frame_info->timestamp);
 		}
+
+                if (additional != NULL) {
+                    printk(", %s", additional);
+                }
+
+                printk("}\n");
             }
         }
     }

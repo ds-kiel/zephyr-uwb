@@ -91,51 +91,6 @@ int get_ranging_ids(const struct dwt_ranging_frame_info *frames_info, uint8_t *r
 #define CIR_CHUNK_WRITE_SIZE (4*13)
 #define CIR_SERIAL_BUF_ENCODED_OFFSET 500
 
-// See lis2dh sensor example
-void ranging_poll_imu_handler(const struct device *sensor) {
-	static unsigned int count;
-	struct sensor_value accel[3];
-	struct sensor_value temperature;
-	const char *overrun = "";
-	int rc = sensor_sample_fetch(sensor);
-
-	++count;
-	if (rc == -EBADMSG) {
-		/* Sample overrun.  Ignore in polled mode. */
-		if (IS_ENABLED(CONFIG_LIS2DH_TRIGGER)) {
-			overrun = "[OVERRUN] ";
-		}
-		rc = 0;
-	}
-	if (rc == 0) {
-		rc = sensor_channel_get(sensor,
-					SENSOR_CHAN_ACCEL_XYZ,
-					accel);
-	}
-	if (rc < 0) {
-		printf("ERROR: Update failed: %d\n", rc);
-	} else {
-		printf("#%u @ %u ms: %sx %f , y %f , z %f",
-		       count, k_uptime_get_32(), overrun,
-		       sensor_value_to_double(&accel[0]),
-		       sensor_value_to_double(&accel[1]),
-		       sensor_value_to_double(&accel[2]));
-	}
-
-	if (IS_ENABLED(CONFIG_LIS2DH_MEASURE_TEMPERATURE)) {
-		if (rc == 0) {
-			rc = sensor_channel_get(sensor, SENSOR_CHAN_DIE_TEMP, &temperature);
-			if (rc < 0) {
-				printf("\nERROR: Unable to read temperature:%d\n", rc);
-			} else {
-				printf(", t %f\n", sensor_value_to_double(&temperature));
-			}
-		}
-
-	} else {
-		printf("\n");
-	}
-}
 
 /* https://docs.zephyrproject.org/apidoc/latest/group__timeutil__sync__apis.html */
 /* https://docs.zephyrproject.org/latest/services/pm/system.html */

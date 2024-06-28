@@ -30,11 +30,54 @@ static struct ieee802154_radio_api *radio_api;
 static const struct device *ieee802154_dev;
 static uint8_t node_ranging_id;
 
+static uint8_t serial_buf[1024];
+
+#define CIR_CHUNK_WRITE_SIZE (4 * 13)
+
+static int current_asn;
+
+int output_cir_rtt(int slot, int phase, const uint8_t *cir_memory, size_t size)
+{
+    // for debug purposes we will measure the timing this takes, which should be quite hefty
+    unsigned int start_ts = k_cycle_get_32(), end_ts;
+
+    int cir_bytes_written = 0;
+    int ret, length;
+
+    length = snprintf(serial_buf, sizeof(serial_buf),
+        "{\"event\": \"cir\", \"i\": %u, \"asn\": %d, \"slot\": %d, "
+        "\"phase\": %d, \"length\": %d, \"data\":\"",
+        node_ranging_id, current_asn, slot, phase, size);
+
+    printk("%s", serial_buf);
+    do {
+        ret = base64_encode(serial_buf, sizeof(serial_buf), &length, cir_memory + cir_bytes_written,
+			    MIN(CIR_CHUNK_WRITE_SIZE, size - cir_bytes_written));
+
+	if (ret >= 0) {
+            serial_buf[length] = '\0';
+	    printk("%s,", serial_buf);
+            cir_bytes_written += CIR_CHUNK_WRITE_SIZE;
+        }
+    } while ( ( (int)size - cir_bytes_written ) > 0);
+
+    length = snprintf(serial_buf, sizeof(serial_buf), "\"}\n");
+
+    printk("%s", serial_buf);
+
+    end_ts = k_cycle_get_32();
+
+    // sys_clock_hw_cycles_per_sec()
+    LOG_WRN("CIR output took %d ms", ( (end_ts - start_ts) * 1000 ) / sys_clock_hw_cycles_per_sec());
+
+    return 0;
+}
+
 static void print_node_information() {
     printk("{\"event\": \"node_info\", \"node_id\": \"0x%04hx\", \"node_ranging_id\": %u}\n", get_own_node_id(), node_ranging_id);
 }
 
-void ranging_mtm_sstwr_cfo_work_handler(uint64_t rtc_event_time, void *user_data)
+void ranging_work_handler(uint64_t rtc_event_time, void *user_data)
 {
     struct sstwr_ranging_conf *ranging_conf = (struct sstwr_ranging_conf *) user_data;
     int tx_slot = DWT_NO_TX_SLOT;
@@ -66,11 +109,12 @@ void ranging_mtm_sstwr_cfo_work_handler(uint64_t rtc_event_time, void *user_data
     struct dwt_ranging_frame_info *frame_infos;
     struct mtm_ranging_config conf = {
 	    .slots_per_phase = ranging_conf->slots,
-            .ranging_id = node_ranging_id,
+	    .ranging_id = node_ranging_id,
 	    .phases = 2,
-            .slot_duration_us = ranging_conf->slot_duration_us,
+	    .slot_duration_us = ranging_conf->slot_duration_us,
 	    .tx_slot_offset = tx_slot,
-            .cfo = 1,
+	    .cfo = 1,
+            .cir_handler = output_cir_rtt,
     };
 
     if (!dwt_mtm_ranging(ieee802154_dev, &conf, &frame_infos)) {
@@ -89,18 +133,10 @@ static struct glossy_conf glossy_conf;
 static struct sstwr_ranging_conf ranging_conf;
 
 static struct experiment_configuration {
-    uint32_t initial_warmup_period_ms;
-    uint32_t scheduler_slots_per_ranging_slot_duration;
-    uint32_t scheduler_slot_duration_ms;
-    uint32_t dense_ranging_slot_duration_us_begin, dense_ranging_slot_duration_us_current, dense_ranging_slot_duration_us_step, dense_ranging_slot_duration_us_end;
+    uint32_t scheduler_slot_duration_ms, dense_ranging_slot_duration_us;
 } exp_conf = {
-	.initial_warmup_period_ms = 120000,
-	.scheduler_slot_duration_ms = 200,
-	.scheduler_slots_per_ranging_slot_duration = 1000,
-	.dense_ranging_slot_duration_us_begin = 1000,
-	.dense_ranging_slot_duration_us_end = 5000,
-	.dense_ranging_slot_duration_us_current = 1000,
-        .dense_ranging_slot_duration_us_step = 1000,
+	.scheduler_slot_duration_ms = 2400,
+	.dense_ranging_slot_duration_us = 200000, // Outputting ACC MEM data takes a long time
 };
 
 
@@ -112,29 +148,20 @@ void schedule_network_next_event()
     glossy_conf.node_addr = node_ranging_id;
 
     // we will spent the first 2 minutes syncing
-
-    int warmup_last_asn = exp_conf.initial_warmup_period_ms / exp_conf.scheduler_slot_duration_ms;
-
     if (asn >= 0) {
-	if (asn >= warmup_last_asn) {
-	    /* set ranging_slot_duration according to settings */
-	    exp_conf.dense_ranging_slot_duration_us_current =
-	            exp_conf.dense_ranging_slot_duration_us_begin +
-                ((asn - warmup_last_asn) / exp_conf.scheduler_slots_per_ranging_slot_duration) * exp_conf.dense_ranging_slot_duration_us_step;
-        }
+        current_asn = asn;
 
-        if (!(asn % 10) || asn < warmup_last_asn) {
+        if (!(asn % 4)) {
             slotted_schedule_work_next_slot(glossy_handler, &glossy_conf, schedule_network_next_event);
 	} else {
-	    ranging_conf.slots = 10;
+	    ranging_conf.slots = 4;
             ranging_conf.asn = asn;
-            ranging_conf.slot_duration_us = exp_conf.dense_ranging_slot_duration_us_current;
+            ranging_conf.slot_duration_us = exp_conf.dense_ranging_slot_duration_us;
 
-            slotted_schedule_work_next_slot(ranging_mtm_sstwr_cfo_work_handler, &ranging_conf, schedule_network_next_event);
+            slotted_schedule_work_next_slot(ranging_work_handler, &ranging_conf, schedule_network_next_event);
         }
     } else {
 	// directly perform glossy
-        /* LOG_WRN("Performing glossy"); */
 	glossy_handler(0, &glossy_conf);
         schedule_network_next_event();
     }
