@@ -333,6 +333,71 @@ def gen_delay_estimates_from_testbed_run(testbed, run, src_dev=None, ignore_pair
 import pandas as pd
 
 
+
+def get_bias_from_rssi(rssi):
+    RANGE_CORR_MAX_RSSI = -61
+    RANGE_CORR_MIN_RSSI = -93
+
+    range_bias_by_rssi = [
+        -23, # -61dBm (-11 cm)
+        -23, # -62dBm (-10.75 cm)
+        -22, # -63dBm (-10.5 cm)
+        -22, # -64dBm (-10.25 cm)
+        -21, # -65dBm (-10.0 cm)
+        -21, # -66dBm (-9.65 cm)
+        -20, # -67dBm (-9.3 cm)
+        -19, # -68dBm (-8.75 cm)
+        -17, # -69dBm (-8.2 cm)
+        -16, # -70dBm (-7.55 cm)
+        -15, # -71dBm (-6.9 cm)
+        -13, # -72dBm (-6.0 cm)
+        -11, # -73dBm (-5.1 cm)
+        -8, # -74dBm (-3.9 cm)
+        -6, # -75dBm (-2.7 cm)
+        -3, # -76dBm (-1.35 cm)
+        0, # -77dBm (0.0 cm)
+        2, # -78dBm (1.05 cm)
+        4, # -79dBm (2.1 cm)
+        6, # -80dBm (2.8 cm)
+        7, # -81dBm (3.5 cm)
+        8, # -82dBm (3.85 cm)
+        9, # -83dBm (4.2 cm)
+        10, # -84dBm (4.55 cm)
+        10, # -85dBm (4.9 cm)
+        12, # -86dBm (5.55 cm)
+        13, # -87dBm (6.2 cm)
+        14, # -88dBm (6.65 cm)
+        15, # -89dBm (7.1 cm)
+        16, # -90dBm (7.35 cm)
+        16, # -91dBm (7.6 cm)
+        17, # -92dBm (7.85 cm)
+        17, # -93dBm (8.1 cm)
+    ]
+
+    rssi = max(min(RANGE_CORR_MAX_RSSI, rssi), RANGE_CORR_MIN_RSSI)
+    return range_bias_by_rssi[-(rssi-RANGE_CORR_MAX_RSSI)]
+
+def correct_for_bias_breaking_change_iter(rec):
+    if rec['event'] == 'rx':
+        if rec['rssi'] >= 0:
+            rec['rssi'] += -174  # IEEE802154_MAC_RSSI_DBM_MIN
+            rec['bias_corrected_rx_ts'] = rec['rx_ts'] - get_bias_from_rssi(rec['rssi'])
+        else:
+            return {
+                'event': '_filtered_rx'
+            }
+    return rec
+
+def correct_for_missing_antenna_delays(testbed, rec):
+    DEFAULT_DELAY = 16450
+    if 'event' in rec:
+        if rec['event'] == 'rx':
+            rec['rx_ts'] += testbed.factory_delays[testbed.devs[rec['own_number']]] - DEFAULT_DELAY
+            rec['bias_corrected_rx_ts'] -= testbed.factory_delays[testbed.devs[rec['own_number']]] - DEFAULT_DELAY
+        elif rec['event'] == 'tx':
+            rec['tx_ts'] += testbed.factory_delays[testbed.devs[rec['own_number']]] - DEFAULT_DELAY
+    return rec
+
 def gen_round_events(testbed, run, iter_per_device=True):
     logfile = "data/{}/{}.log".format(testbed.name, run)
 
@@ -340,6 +405,8 @@ def gen_round_events(testbed, run, iter_per_device=True):
         it_rx_events = []
         it_tx_events = []
         it_round = None
+
+        init_events = {}
 
         for log_ts, dev, x in it:
             if filter_dev is not None and filter_dev != dev:
@@ -351,8 +418,14 @@ def gen_round_events(testbed, run, iter_per_device=True):
                 e_r = int(x['rx_round'])
             elif e == 'tx':
                 e_r = int(x['tx_round'])
-            else:
+            elif e == 'init':
+                init_events[dev] = x
                 continue
+
+            # Compatibility with old logs
+            if 'version' not in init_events[dev]:
+                x = correct_for_bias_breaking_change_iter(x)
+                x = correct_for_missing_antenna_delays(testbed, x)
 
             if it_round is None:
                 it_round = e_r
