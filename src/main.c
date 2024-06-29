@@ -465,6 +465,7 @@ int8_t schedule_get_tx_node_number(uint32_t r, uint32_t slot) {
 
 #endif
 
+#define VERSION "0.1"
 
 int main(void) {
 
@@ -507,14 +508,14 @@ int main(void) {
 
     {
        char buf[512];
-       snprintf(buf, sizeof(buf), "{\"event\": \"init\", \"own_number\": %hhu, \"rx_delay\": %hu, \"tx_delay\": %hu, \"experiment\": \"%s\"}\n", own_number, rx_delay, tx_delay, EXPERIMENT_NAME);
+       snprintf(buf, sizeof(buf), "{\"event\": \"init\", \"own_number\": %hhu, \"rx_delay\": %hu, \"tx_delay\": %hu, \"experiment\": \"%s\", \"version\": \"%s\"}\n", own_number, rx_delay, tx_delay, EXPERIMENT_NAME, VERSION);
        log_out(buf); // this will be flushed later!
        log_flush();
     }
 
 
-    //dwt_set_antenna_delay_rx(ieee802154_dev, 16450);
-    //dwt_set_antenna_delay_tx(ieee802154_dev, 16450);
+    dwt_set_antenna_delay_rx(ieee802154_dev, rx_delay);
+    dwt_set_antenna_delay_tx(ieee802154_dev, tx_delay);
 
     // we disable the frame filter, otherwise the packets are not received!
     dwt_set_frame_filter(ieee802154_dev, 0, 0);
@@ -767,7 +768,17 @@ int net_recv_data(struct net_if *iface, struct net_pkt *pkt)
 
             uint64_t rx_ts = dwt_rx_ts(ieee802154_dev);
             int carrierintegrator = dwt_readcarrierintegrator(ieee802154_dev);
-            int8_t rssi = (int8_t)net_pkt_ieee802154_rssi_dbm(pkt);
+
+            int16_t new_rssi = net_pkt_ieee802154_rssi_dbm(pkt);
+
+            if (new_rssi == IEEE802154_MAC_RSSI_DBM_UNDEFINED || new_rssi > 127) {
+                new_rssi = 127; // we can represent this with an 8int
+            }
+            else if (new_rssi < -128) {
+                new_rssi = -128; // we can represent this with an 8int
+            }
+
+            int8_t rssi = (int8_t)new_rssi;
             int8_t bias_correction = get_range_bias_by_rssi(rssi);
             uint64_t bias_corrected_rx_ts = rx_ts - bias_correction;
             uint8_t rx_ttcko_rc_phase = dwt_rx_ttcko_rc_phase(ieee802154_dev);
