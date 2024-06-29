@@ -767,7 +767,7 @@ int net_recv_data(struct net_if *iface, struct net_pkt *pkt)
 
             uint64_t rx_ts = dwt_rx_ts(ieee802154_dev);
             int carrierintegrator = dwt_readcarrierintegrator(ieee802154_dev);
-            int8_t rssi = (int8_t)net_pkt_ieee802154_rssi(pkt);
+            int8_t rssi = (int8_t)net_pkt_ieee802154_rssi_dbm(pkt);
             int8_t bias_correction = get_range_bias_by_rssi(rssi);
             uint64_t bias_corrected_rx_ts = rx_ts - bias_correction;
             uint8_t rx_ttcko_rc_phase = dwt_rx_ttcko_rc_phase(ieee802154_dev);
