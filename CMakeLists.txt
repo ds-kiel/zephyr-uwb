@@ -21,8 +21,9 @@ target_sources(app PRIVATE
   src/testbeds/testbed_trento_b.c
 
 
-  apps/cir-evaluation.c
+  # apps/cir-evaluation.c
   # apps/ranging-with-imu.c
   # apps/cycle-slot-durations.c
-  # apps/contention-access.c
+  # apps/random-contention-access.c
+  apps/fixed-contention-access.c
 )

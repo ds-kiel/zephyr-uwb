@@ -403,23 +403,25 @@ def extract_record(
         (data.get('final_rx', {}) or {}).get('ci', None)
     )
 
+    if None not in [round_a, delay_b]:
+        record['twr_tof_ss'] = (
+            convert_ts_to_m((round_a - record['response_rd_cfo'] * delay_b) * 0.5)
+            if record['response_rd_cfo'] is not None
+            else None
+        )
+
+        record['twr_tof_ss_reverse'] = (
+            convert_ts_to_m((round_b - record['final_rd_cfo'] * delay_a) * 0.5)
+            if record['final_rd_cfo'] is not None
+            else None
+        )
+
     if None not in [round_a, delay_b, delay_a, round_b]:
         relative_drift = float(round_a + delay_a) / float(round_b + delay_b)
         twr_tof = convert_ts_to_m((round_a - relative_drift * delay_b) * 0.5)
 
         record['relative_drift'] = relative_drift
         record['twr_tof_ds'] = twr_tof
-
-        record['twr_tof_ss'] = (
-            convert_ts_to_m((round_a - record['response_rd_cfo'] * delay_b) * 0.5)
-            if record['response_rd_cfo'] is not None
-            else None
-        )
-        record['twr_tof_ss_reverse'] = (
-            convert_ts_to_m((round_b - record['final_rd_cfo'] * delay_a) * 0.5)
-            if record['final_rd_cfo'] is not None
-            else None
-        )
 
         if tdoa_src_dev:
             if not hasattr(testbed, 'get_dist'):
@@ -586,3 +588,16 @@ if __name__ == '__main__':
     print(df)
 
     df.to_csv('out.csv')
+
+    # output as gzip json
+    rename_columns = {'round': 'asn', 'dist': 'ground_truth_dist', 'initiator': 'own_id', 'responder': 'other_id'}
+    df.rename(columns=rename_columns, inplace=True)
+    output_columns = ['ground_truth_dist', 'twr_tof_ss', 'pair', 'own_id', 'other_id', 'asn']
+
+    if 'twr_tof_ds' in df.columns:
+        output_columns.append('twr_tof_ds')
+
+    output_df = df[output_columns]
+
+    output_df.to_json('distances.json.gz', orient='records', lines=True, compression='gzip')
+    # output

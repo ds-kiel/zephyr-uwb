@@ -21,10 +21,9 @@
 LOG_MODULE_REGISTER(main);
 
 struct sstwr_ranging_conf {
-    uint8_t slots;
+    uint8_t concurrent_senders;
     int asn;
     uint32_t slot_duration_us;
-    float access_probability;
 };
 
 static struct ieee802154_radio_api *radio_api;
@@ -46,19 +45,18 @@ void ranging_mtm_sstwr_cfo_work_handler(uint64_t rtc_event_time, void *user_data
     radio_api->start(ieee802154_dev);
 #endif
 
-    uint8_t tx_slot = (sys_rand32_get() % ranging_conf->slots);
-
-    // try to maximize channel utilization
-    uint8_t access_medium = ((float) (sys_rand32_get() % 10000) / (float) 10000) < ranging_conf->access_probability;
+    uint8_t tx_slot = DWT_NO_TX_SLOT;
 
     // for now put every node on slot 1
-    if (!access_medium) {
-        tx_slot = DWT_NO_TX_SLOT;
+    if (node_ranging_id == 0) {
+        tx_slot = 0;
+    } else if (node_ranging_id <= ranging_conf->concurrent_senders) {
+        tx_slot = 1;
     }
 
     struct dwt_ranging_frame_info *frame_infos;
     struct mtm_ranging_config conf = {
-	    .slots_per_phase = ranging_conf->slots,
+	    .slots_per_phase = 2,
             .ranging_id = node_ranging_id,
 	    .phases = 2,
             .slot_duration_us = ranging_conf->slot_duration_us,
@@ -68,7 +66,7 @@ void ranging_mtm_sstwr_cfo_work_handler(uint64_t rtc_event_time, void *user_data
 
     if (!dwt_mtm_ranging(ieee802154_dev, &conf, &frame_infos)) {
         static char round_info[100];
-        snprintf(round_info, sizeof(round_info), "\"access_prob\": %f, \"slot_dur_us\": %u, \"asn\": %d", ranging_conf->access_probability, conf.slot_duration_us, ranging_conf->asn);
+        snprintf(round_info, sizeof(round_info), "\"concurrent_senders\": %u, \"slot_dur_us\": %u, \"asn\": %d", ranging_conf->concurrent_senders, conf.slot_duration_us, ranging_conf->asn);
         output_frame_timestamps(frame_infos, &conf, rtc_event_time, round_info);
     }
 
@@ -86,17 +84,16 @@ static struct experiment_configuration {
     uint32_t scheduler_slot_duration_ms;
     uint32_t dense_ranging_slot_duration_us_current;
 
-    float prob_start, prob_end, prob_step;
-    uint32_t slots_per_prob;
+    uint8_t concurrent_start, concurrent_end;
+    uint32_t rounds_per_iteration;
 } exp_conf = {
 	.initial_warmup_period_ms = 60000,
-	.scheduler_slot_duration_ms = 30,
+	.scheduler_slot_duration_ms = 50,
 	.dense_ranging_slot_duration_us_current = 800,
 
-	.prob_start = 0.3,
-	.prob_end = 1,
-	.prob_step = 0.1,
-        .slots_per_prob = 1000,
+	.concurrent_start = 1,
+	.concurrent_end = 4,
+        .rounds_per_iteration = 1000,
 };
 
 
@@ -111,21 +108,22 @@ void schedule_network_next_event()
 
     int warmup_last_asn = exp_conf.initial_warmup_period_ms / exp_conf.scheduler_slot_duration_ms;
 
-    // if we arrived at the last asn abort experiment
-    if(asn >= warmup_last_asn + exp_conf.slots_per_prob * ((exp_conf.prob_end - exp_conf.prob_start) / exp_conf.prob_step + 1)) {
-        return;
-    }
 
     if (asn >= 0) {
+
+        // if we arrived at the last asn abort experiment
+        if(asn >= warmup_last_asn + exp_conf.rounds_per_iteration * ((exp_conf.concurrent_end - exp_conf.concurrent_start) + 1)) {
+            return;
+        }
+
         if (!(asn % 10) || asn < warmup_last_asn) {
             slotted_schedule_work_next_slot(glossy_handler, &glossy_conf, schedule_network_next_event);
 	} else {
-	    ranging_conf.slots = NUM_NODES;
             ranging_conf.asn = asn;
 	    ranging_conf.slot_duration_us = exp_conf.dense_ranging_slot_duration_us_current;
 
-            int prob = (asn - warmup_last_asn) / exp_conf.slots_per_prob;
-            ranging_conf.access_probability = exp_conf.prob_start + prob * exp_conf.prob_step;
+            uint8_t senders = (asn - warmup_last_asn) / exp_conf.rounds_per_iteration;
+            ranging_conf.concurrent_senders = exp_conf.concurrent_start + senders;
 
             slotted_schedule_work_next_slot(ranging_mtm_sstwr_cfo_work_handler, &ranging_conf, schedule_network_next_event);
         }

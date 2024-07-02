@@ -215,12 +215,12 @@ void output_frame_timestamps(const struct dwt_ranging_frame_info *frame_infos,
 		} else {
 		    printk("{\"event\": \"rx\", \"own_id\": %u, \"other_id\": %u,"
 			   "\"rtc_round_ts\": %llu, \"phase\": %u, \"slot\": %u,"
-			   "\"fp_ampl1\": %u, \"fp_ampl2\": %u, \"fp_ampl3\": %u,"
+			   "\"fp_ampl1\": %u, \"fp_ampl2\": %u, \"fp_ampl3\": %u, \"std_noise\": %u,"
 			   "\"fp_index\": %u, \"cir_pwr\": %u, \"cfo\": %d, \"rx_pacc\": %u,"
 			   "\"ts\": %llu",
 			   conf->ranging_id, curr_frame->ranging_id, rtc_slot_ts, i, j,
 			   curr_frame_info->fp_ampl1, curr_frame_info->fp_ampl2,
-			   curr_frame_info->fp_ampl3, curr_frame_info->fp_index >> 6,
+                        curr_frame_info->fp_ampl3, curr_frame_info->std_noise, curr_frame_info->fp_index >> 6,
 			   curr_frame_info->cir_pwr, (int)(curr_frame_info->cfo_ppm * 1e6),
                         curr_frame_info->rx_pacc, curr_frame_info->timestamp);
 		}

@@ -15,9 +15,9 @@ uint16_t node_ids[NUM_NODES] = {
 	0xc7f6, // gateway-stativ-1-dwm1001-000760120221
 	0x4d0f, // gateway-stativ-3-dwm1001-000760119517
 	0xbe83, // gateway-stativ-4-dwm1001-000760119517
+	0xbdea, // gateway-503-9-dwm1001-000760120369		//
 	0x2b75, // profiled-gateway-1
 	0x0320, // profiled-gateway-1-dwm1001-000760119483		//
-	0xbdea, // gateway-503-9-dwm1001-000760120369
 	0xe680, // gateway-503-1-dwm1001-000760120328
 	0x9d21, // mobile-gateway
 	0xf39f, // gateway-503-0-dwm1001-000760120293
